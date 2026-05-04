@@ -8,7 +8,7 @@
 
 ## 👥 팀 소개
 
-| <div align="center"><strong>TL/FE/DE 유설희</strong></div>                                           | <div align="center"><strong>PM/BE 박찬홍</strong></div>                                                | <div align="center"><strong>PM/BE 김태윤<</strong></div>                                               |
+| <div align="center"><strong>TL/FE/DE 유설희</strong></div>                                           | <div align="center"><strong>PM/BE 박찬홍</strong></div>                                                | <div align="center"><strong>PM/BE 김태윤</strong></div>                                               |
 | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 
 ## 🛠️ Tech Stack
@@ -135,7 +135,7 @@ Closes #이슈번호
 ### 1. Clone & Install
 
 ```bash
-git clone 
+git clone https://github.com/OSSP-CSC4004-03-10/OSSP_CSC4004_03_10.git
 cd OSSP_10
 pnpm i
 ```
