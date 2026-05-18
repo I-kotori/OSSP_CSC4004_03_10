@@ -1,0 +1,18 @@
+# 1. 환경 변수 및 보안 (가장 중요!)
+.env
+
+# 2. 파이썬 가상환경 (용량 낭비 방지)
+venv/
+env/
+
+# 3. 파이썬 컴파일 캐시 찌꺼기
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 4. 로컬 데이터베이스 (README에 있던 캐싱 DB)
+analyzer.db
+*.sqlite3
+
+# 5. OS 생성 임시 파일 (맥북 환경 고려)
+.DS_Store
