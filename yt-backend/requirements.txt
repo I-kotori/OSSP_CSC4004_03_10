@@ -1,0 +1,10 @@
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-dotenv==1.0.1
+
+# ML 파이프라인
+sentence-transformers==2.7.0
+scikit-learn
+google-api-python-client==2.128.0
+requests==2.31.0
+numpy==1.26.4
