@@ -2,6 +2,12 @@ let isPanelOpen = false;
 let currentTab = "cluster";
 let selectedTimeSlot = null;
 
+let analysisData = null;
+let analysisLoading = false;
+let analysisError = null;
+
+const API_BASE = "https://osspapi.butterflyjin.kr";
+
 const tabs = [
   { id: "cluster", label: "여론 군집" },
   { id: "timeline", label: "시간대별 분석" },
@@ -9,203 +15,6 @@ const tabs = [
   { id: "balance", label: "의견 균형 보기" },
 ];
 
-const CLUSTERS = [
-  {
-    id: "positive",
-    label: "AI 발전 긍정적",
-    percent: 38,
-    color: "#4ade80",
-    colorBg: "rgba(74,222,128,0.13)",
-    colorBorder: "rgba(74,222,128,0.4)",
-    dotClass: "green",
-    tags: ["기술 혁신", "생산성 향상", "미래 낙관"],
-    topComment: "AI가 반복 업무를 줄여 더 창의적인 일에 집중하게 해줄 것 같아요.",
-    count: "3,204개 댓글",
-  },
-  {
-    id: "danger",
-    label: "AI 위험 우려",
-    percent: 23,
-    color: "#f87171",
-    colorBg: "rgba(248,113,113,0.13)",
-    colorBorder: "rgba(248,113,113,0.4)",
-    dotClass: "red",
-    tags: ["일자리 문제", "개인정보", "규제 필요"],
-    topComment: "기술 발전은 좋지만 일자리·개인정보 문제는 함께 논의해야 합니다.",
-    count: "1,939개 댓글",
-  },
-  {
-    id: "realistic",
-    label: "현실적 접근 필요",
-    percent: 24,
-    color: "#818cf8",
-    colorBg: "rgba(129,140,248,0.13)",
-    colorBorder: "rgba(129,140,248,0.4)",
-    dotClass: "blue",
-    tags: ["교육 준비", "제도 정비", "균형 시각"],
-    topComment: "무조건 찬반보다 교육·제도 준비가 먼저라고 생각합니다.",
-    count: "2,024개 댓글",
-  },
-  {
-    id: "neutral",
-    label: "중립적 / 기타",
-    percent: 15,
-    color: "#94a3b8",
-    colorBg: "rgba(148,163,184,0.13)",
-    colorBorder: "rgba(148,163,184,0.4)",
-    dotClass: "gray",
-    tags: ["관망", "판단 보류", "기타 의견"],
-    topComment: "아직 판단하기 어렵지만 앞으로 어떤 변화가 올지 궁금합니다.",
-    count: "1,265개 댓글",
-  },
-];
-
-const TIMELINE_DATA = [
-  {
-    label: "0-2시간",
-    x: 0,
-    yPositive: 132,
-    yDanger: 158,
-    yRealistic: 198,
-    yNeutral: 224,
-    positive: 40,
-    danger: 19,
-    realistic: 24,
-    neutral: 17,
-    comments: {
-      positive: ["초반 반응이 매우 긍정적이네요! AI 발전 기대됩니다.", "와 이 기술 정말 혁신적인데요?"],
-      danger: ["하지만 개인정보 보호는 어떻게 되나요?", "일자리 문제가 걱정되긴 합니다."],
-      realistic: ["기술은 좋지만 제도가 따라가야 할 것 같아요.", "교육 시스템 개편이 필요할 듯."],
-      neutral: ["일단 지켜봐야 할 것 같습니다.", "아직 판단하기 이릅니다."],
-    },
-  },
-  {
-    label: "2-4시간",
-    x: 128,
-    yPositive: 113,
-    yDanger: 173,
-    yRealistic: 191,
-    yNeutral: 238,
-    positive: 42,
-    danger: 18,
-    realistic: 25,
-    neutral: 15,
-    comments: {
-      positive: ["시간이 지날수록 더 긍정적으로 보이네요.", "생산성 향상 효과가 클 것 같습니다."],
-      danger: ["그래도 규제는 필요하지 않을까요?", "부작용에 대한 대비가 필요합니다."],
-      realistic: ["단계적 도입이 현실적일 것 같아요.", "교육과 병행되어야 합니다."],
-      neutral: ["좀 더 시간을 두고 봐야겠어요.", "아직 결론 내리기 이릅니다."],
-    },
-  },
-  {
-    label: "4-8시간",
-    x: 256,
-    yPositive: 99,
-    yDanger: 188,
-    yRealistic: 188,
-    yNeutral: 245,
-    positive: 43,
-    danger: 17,
-    realistic: 25,
-    neutral: 15,
-    comments: {
-      positive: ["이 정도면 정말 획기적인 변화입니다.", "미래가 기대되는 기술이네요."],
-      danger: ["AI 윤리 문제도 고려해야 합니다.", "일자리 대체 문제는 심각합니다."],
-      realistic: ["정부의 체계적인 준비가 필요해요.", "사회 전반의 합의가 우선입니다."],
-      neutral: ["아직 확신이 서지 않습니다.", "더 많은 사례를 봐야 할 것 같아요."],
-    },
-  },
-  {
-    label: "8-12시간",
-    x: 384,
-    yPositive: 92,
-    yDanger: 195,
-    yRealistic: 188,
-    yNeutral: 245,
-    positive: 44,
-    danger: 16,
-    realistic: 25,
-    neutral: 15,
-    comments: {
-      positive: ["계속 지켜봤는데 정말 긍정적입니다.", "이런 혁신은 환영합니다."],
-      danger: ["하지만 리스크 관리가 중요합니다.", "개인정보 유출 가능성은?"],
-      realistic: ["법적 제도가 먼저 갖춰져야 해요.", "점진적 접근이 필요합니다."],
-      neutral: ["여전히 관망 중입니다.", "판단 보류."],
-    },
-  },
-  {
-    label: "12-24시간",
-    x: 512,
-    yPositive: 92,
-    yDanger: 195,
-    yRealistic: 188,
-    yNeutral: 245,
-    positive: 44,
-    danger: 16,
-    realistic: 25,
-    neutral: 15,
-    comments: {
-      positive: ["하루가 지나도 긍정적인 의견이 우세하네요.", "정말 기대되는 기술입니다."],
-      danger: ["장기적 영향은 아직 모릅니다.", "부작용 연구가 필요합니다."],
-      realistic: ["교육 시스템 개편이 시급합니다.", "사회적 합의가 먼저입니다."],
-      neutral: ["좀 더 지켜봐야 할 것 같아요.", "아직 모르겠습니다."],
-    },
-  },
-  {
-    label: "1-2일",
-    x: 640,
-    yPositive: 85,
-    yDanger: 202,
-    yRealistic: 188,
-    yNeutral: 245,
-    positive: 45,
-    danger: 15,
-    realistic: 25,
-    neutral: 15,
-    comments: {
-      positive: ["시간이 지날수록 확신이 듭니다.", "AI 시대가 곧 올 것 같아요."],
-      danger: ["하지만 규제는 꼭 필요합니다.", "윤리적 문제 해결이 우선입니다."],
-      realistic: ["준비 과정이 중요합니다.", "단계별 로드맵이 필요해요."],
-      neutral: ["여전히 판단 보류입니다.", "더 지켜봐야겠습니다."],
-    },
-  },
-  {
-    label: "2-3일",
-    x: 768,
-    yPositive: 92,
-    yDanger: 195,
-    yRealistic: 188,
-    yNeutral: 245,
-    positive: 44,
-    danger: 16,
-    realistic: 25,
-    neutral: 15,
-    comments: {
-      positive: ["긍정적인 측면이 더 많아 보입니다.", "발전적인 방향입니다."],
-      danger: ["여전히 우려스러운 부분이 있습니다.", "리스크가 완전히 해소되진 않았어요."],
-      realistic: ["균형잡힌 접근이 필요합니다.", "제도 정비가 시급합니다."],
-      neutral: ["아직도 확신이 없습니다.", "좀 더 관망하겠습니다."],
-    },
-  },
-  {
-    label: "3일+",
-    x: 896,
-    yPositive: 92,
-    yDanger: 195,
-    yRealistic: 188,
-    yNeutral: 245,
-    positive: 44,
-    danger: 16,
-    realistic: 25,
-    neutral: 15,
-    comments: {
-      positive: ["장기적으로도 긍정적인 것 같습니다.", "미래 지향적인 기술이에요."],
-      danger: ["하지만 경계를 늦춰선 안 됩니다.", "지속적인 모니터링이 필요합니다."],
-      realistic: ["사회 전체의 준비가 필요해요.", "교육과 제도가 함께 가야 합니다."],
-      neutral: ["여전히 판단 중입니다.", "결론 내리기 어렵습니다."],
-    },
-  },
-];
 
 const PIE = {
   cx: 160,
@@ -213,20 +22,57 @@ const PIE = {
   r: 112,
 };
 
-const SLICES = createSlices();
+function getVideoId() {
+  const url = new URL(location.href);
+  return url.searchParams.get("v");
+}
+
 
 function createSlices() {
+  if (!analysisData?.clusters) return [];
+
   let currentDeg = 0;
 
-  return CLUSTERS.map((cluster) => {
+  const colors = [
+    {
+      color: "#4ade80",
+      colorBg: "rgba(74,222,128,0.13)",
+      colorBorder: "rgba(74,222,128,0.4)",
+    },
+    {
+      color: "#f87171",
+      colorBg: "rgba(248,113,113,0.13)",
+      colorBorder: "rgba(248,113,113,0.4)",
+    },
+    {
+      color: "#818cf8",
+      colorBg: "rgba(129,140,248,0.13)",
+      colorBorder: "rgba(129,140,248,0.4)",
+    },
+    {
+      color: "#94a3b8",
+      colorBg: "rgba(148,163,184,0.13)",
+      colorBorder: "rgba(148,163,184,0.4)",
+    },
+  ];
+
+  return analysisData.clusters.map((cluster, index) => {
     const start = currentDeg;
     const sweep = (cluster.percent / 100) * 360;
     const end = start + sweep;
 
     currentDeg = end;
 
+    const colorSet = colors[index % colors.length];
+
     return {
-      ...cluster,
+      id: cluster.id,
+      label: cluster.label,
+      percent: cluster.percent,
+      count: `${cluster.comment_count.toLocaleString()}개 댓글`,
+      tags: cluster.tags || [],
+      topComment: cluster.top_comments?.[0] || "대표 댓글 없음",
+      ...colorSet,
       start,
       end,
       lp: polarToXY(PIE.cx, PIE.cy, PIE.r + 30, (start + end) / 2),
@@ -241,6 +87,153 @@ function polarToXY(cx, cy, r, deg) {
     x: cx + r * Math.cos(rad),
     y: cy + r * Math.sin(rad),
   };
+}
+
+async function fetchAnalysis(videoId) {
+  try {
+    analysisLoading = true;
+    analysisError = null;
+
+    const url = `${API_BASE}/analyze/${videoId}`;
+
+    console.log("API_BASE:", API_BASE);
+    console.log("요청 URL:", url);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    console.log("응답 상태:", response.status);
+
+    const text = await response.text();
+
+    console.log("응답 내용:", text);
+
+    const data = JSON.parse(text);
+
+    console.log("파싱 결과:", data);
+
+    if (data.result) {
+      analysisData = data.result;
+      analysisLoading = false;
+
+      rerenderPanel();
+
+      return;
+    }
+
+    if (data.job_id) {
+      rerenderPanel();
+      await pollJob(data.job_id);
+    }
+
+  } catch (error) {
+    console.error("FETCH ERROR:", error);
+
+    analysisError = error.message;
+    analysisLoading = false;
+
+    rerenderPanel();
+  }
+}
+
+function getTimelineData() {
+  if (!analysisData?.timeline || !analysisData?.clusters) {
+    return [];
+  }
+
+  const clusterMap = {};
+
+  analysisData.clusters.forEach((cluster) => {
+    clusterMap[cluster.id] = cluster;
+  });
+
+  return analysisData.timeline.map((slot, index) => {
+    const clusters = slot.clusters || {};
+
+    const entries = Object.entries(clusters);
+
+    return {
+      label: slot.label,
+      x: index * 128,
+
+      values: entries.map(([clusterId, percent], idx) => {
+        const cluster = clusterMap[clusterId];
+
+        const colors = [
+          "#4ade80",
+          "#f87171",
+          "#818cf8",
+          "#a78bfa",
+          "#94a3b8",
+        ];
+
+        return {
+          id: clusterId,
+          label: cluster?.label || clusterId,
+          percent,
+          color: colors[idx % colors.length],
+
+          y: 260 - percent * 2,
+
+          comments: cluster?.top_comments || [],
+        };
+      }),
+    };
+  });
+}
+
+async function pollJob(jobId) {
+  console.log("폴링 시작:", jobId);
+
+  const interval = setInterval(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/status/${jobId}`);
+
+      const data = await response.json();
+
+      console.log("status polling:", data);
+
+      if (data.status === "done") {
+        clearInterval(interval);
+
+        console.log("분석 완료");
+
+        console.log("최종 result:", data.result);
+        console.log("clusters:", data.result?.clusters);
+
+        analysisData = data.result;
+
+        analysisLoading = false;
+
+        rerenderPanel();
+      }
+
+      if (data.status === "failed") {
+        clearInterval(interval);
+
+        console.log("분석 실패");
+
+        analysisError = "분석 실패";
+        analysisLoading = false;
+
+        rerenderPanel();
+      }
+
+    } catch (error) {
+      clearInterval(interval);
+
+      console.error("POLL ERROR:", error);
+
+      analysisError = error.message;
+      analysisLoading = false;
+
+      rerenderPanel();
+    }
+  }, 2000);
 }
 
 function slicePath(cx, cy, r, startDeg, endDeg) {
@@ -263,26 +256,80 @@ function renderTabContent(tab) {
 }
 
 function renderClusterTab() {
+  if (analysisLoading) {
+    return `
+      <div class="analysis-box">
+        <h3>댓글 분석 중...</h3>
+        <p style="color:#aaa;">AI가 댓글을 군집화하고 있습니다.</p>
+      </div>
+    `;
+  }
+
+  if (analysisError) {
+    return `
+      <div class="analysis-box">
+        <h3>오류</h3>
+        <p style="color:#f87171;">${analysisError}</p>
+      </div>
+    `;
+  }
+
+  if (!analysisData) {
+    return `
+      <div class="analysis-box">
+        <h3>분석 데이터 없음</h3>
+      </div>
+    `;
+  }
+
+  const slices = createSlices();
+
   return `
     <div class="cluster-tab-wrap">
       <div class="cluster-pie-wrap">
         <svg class="cluster-pie-svg" id="cluster-svg" viewBox="0 0 320 320" width="320" height="320">
           <circle cx="${PIE.cx}" cy="${PIE.cy}" r="${PIE.r + 5}" fill="none" stroke="#2e2e2e" stroke-width="1"/>
-          ${renderPieSlices()}
-          ${renderPieLabels()}
+
+          ${renderPieSlices(slices)}
+
+          ${renderPieLabels(slices)}
+
           <circle cx="${PIE.cx}" cy="${PIE.cy}" r="54" fill="#1b1b1b"/>
-          <text x="${PIE.cx}" y="${PIE.cy - 9}" text-anchor="middle" fill="#f1f1f1" font-size="20" font-weight="900" font-family="Roboto,Arial,sans-serif">8,432</text>
-          <text x="${PIE.cx}" y="${PIE.cy + 13}" text-anchor="middle" fill="#9aa3b5" font-size="11" font-family="Roboto,Arial,sans-serif">총 댓글</text>
+
+          <text
+            x="${PIE.cx}"
+            y="${PIE.cy - 9}"
+            text-anchor="middle"
+            fill="#f1f1f1"
+            font-size="20"
+            font-weight="900"
+          >
+            ${analysisData.total_comments.toLocaleString()}
+          </text>
+
+          <text
+            x="${PIE.cx}"
+            y="${PIE.cy + 13}"
+            text-anchor="middle"
+            fill="#9aa3b5"
+            font-size="11"
+          >
+            총 댓글
+          </text>
         </svg>
-        ${renderClusterTooltips()}
+
+        ${renderClusterTooltips(slices)}
       </div>
-      <div class="cluster-legend">${renderClusterLegend()}</div>
+
+      <div class="cluster-legend">
+        ${renderClusterLegend(slices)}
+      </div>
     </div>
   `;
 }
 
-function renderPieSlices() {
-  return SLICES.map((slice, index) => `
+function renderPieSlices(slices) {
+  return slices.map((slice, index) => `
     <path
       class="pie-slice"
       data-index="${index}"
@@ -295,8 +342,8 @@ function renderPieSlices() {
   `).join("");
 }
 
-function renderPieLabels() {
-  return SLICES.map((slice) => `
+function renderPieLabels(slices) {
+  return slices.map((slice) => `
     <text
       x="${slice.lp.x}"
       y="${slice.lp.y}"
@@ -311,8 +358,8 @@ function renderPieLabels() {
   `).join("");
 }
 
-function renderClusterTooltips() {
-  return SLICES.map((slice, index) => `
+function renderClusterTooltips(slices) {
+  return slices.map((slice, index) => `
     <div
       class="cluster-tooltip"
       id="ctip-${index}"
@@ -332,8 +379,8 @@ function renderClusterTooltips() {
   `).join("");
 }
 
-function renderClusterLegend() {
-  return SLICES.map((slice) => `
+function renderClusterLegend(slices) {
+  return slices.map((slice) => `
     <div class="cluster-legend-item">
       <span class="cluster-legend-dot" style="background:${slice.color};"></span>
       <span>${slice.label}</span>
@@ -391,173 +438,195 @@ function moveTooltip(event, tooltip) {
   tooltip.style.top = `${y}px`;
 }
 
+function rerenderPanel() {
+  const body = document.querySelector(".analysis-body");
+
+  if (!body) return;
+
+  body.innerHTML = renderTabContent(currentTab);
+
+  initCurrentTabEvents();
+}
+
 function renderTimelineTab() {
+  const timelineData = getTimelineData();
+
+  if (!timelineData.length) {
+    return `
+      <div class="analysis-box">
+        <h3>시간대 데이터 없음</h3>
+      </div>
+    `;
+  }
+
   return `
     <div class="analysis-box full">
       <h3>시간대별 여론 변화</h3>
+
       <div class="line-chart" id="timeline-chart">
+
+        <!-- ✅ 범례를 위로 이동 -->
+        <div class="chart-legend top">
+          ${analysisData.clusters.map((cluster, index) => {
+            const colors = [
+              "#4ade80",
+              "#f87171",
+              "#818cf8",
+              "#a78bfa",
+              "#94a3b8",
+            ];
+
+            return `
+              <div class="chart-legend-item">
+                <span
+                  class="chart-legend-dot"
+                  style="background:${colors[index % colors.length]}"
+                ></span>
+
+                <span>${cluster.label}</span>
+              </div>
+            `;
+          }).join("")}
+        </div>
+
         <div class="chart-grid"></div>
+
         <svg viewBox="0 0 900 330" preserveAspectRatio="none">
-          <polyline points="0,132 128,113 256,99 384,92 512,92 640,85 768,92 896,92" class="line green-line"/>
-          <polyline points="0,158 128,173 256,188 384,195 512,195 640,202 768,195 896,195" class="line red-line"/>
-          <polyline points="0,198 128,191 256,188 384,188 512,188 640,188 768,188 896,188" class="line blue-line"/>
-          <polyline points="0,224 128,238 256,245 384,245 512,245 640,245 768,245 896,245" class="line purple-line"/>
+          ${renderTimelineLines(timelineData)}
         </svg>
-        ${renderTimelinePoints()}
+
         <div class="x-labels">
-          ${TIMELINE_DATA.map((data, index) => `<span data-slot="${index}">${data.label}</span>`).join("")}
+          ${timelineData.map((slot, index) => `
+            <button
+              class="timeline-slot-label ${selectedTimeSlot === index ? "active" : ""}"
+              data-slot="${index}"
+            >
+              ${slot.label}
+            </button>
+          `).join("")}
         </div>
-        <div class="chart-legend">
-          <span class="green-text">AI 발전 긍정적</span>
-          <span class="red-text">AI 위험 우려</span>
-          <span class="blue-text">현실적 접근 필요</span>
-          <span class="purple-text">중립적/기타</span>
-        </div>
+
         <div id="timeline-tooltip" class="timeline-tooltip"></div>
       </div>
     </div>
+
     <div id="timeline-comments" class="timeline-comments-section"></div>
   `;
 }
 
-function renderTimelinePoints() {
-  const points = TIMELINE_DATA.map((data, index) => `
-    <circle class="timeline-point" data-slot="${index}" cx="${data.x}" cy="${data.yPositive}" r="6" fill="#4ade80"/>
-    <circle class="timeline-point" data-slot="${index}" cx="${data.x}" cy="${data.yDanger}" r="6" fill="#f87171"/>
-    <circle class="timeline-point" data-slot="${index}" cx="${data.x}" cy="${data.yRealistic}" r="6" fill="#818cf8"/>
-    <circle class="timeline-point" data-slot="${index}" cx="${data.x}" cy="${data.yNeutral}" r="6" fill="#a267f5"/>
-  `).join("");
+function renderTimelineLines(timelineData) {
+  const clusterIds = new Set();
 
-  return `<svg class="timeline-points" viewBox="0 0 900 330" preserveAspectRatio="none">${points}</svg>`;
+  timelineData.forEach((slot) => {
+    slot.values.forEach((v) => {
+      clusterIds.add(v.id);
+    });
+  });
+
+  return [...clusterIds].map((clusterId) => {
+    const points = timelineData.map((slot) => {
+      const found = slot.values.find((v) => v.id === clusterId);
+
+      if (!found) return null;
+
+      return `${slot.x},${found.y}`;
+    }).filter(Boolean).join(" ");
+
+    const color =
+      timelineData
+        .flatMap((s) => s.values)
+        .find((v) => v.id === clusterId)?.color || "#999";
+
+    return `
+      <polyline
+        points="${points}"
+        fill="none"
+        stroke="${color}"
+        stroke-width="4"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        opacity="0.9"
+      />
+    `;
+  }).join("");
 }
+
 
 function initTimelineEvents() {
   const chart = document.getElementById("timeline-chart");
+
   if (!chart) return;
 
-  const points = chart.querySelectorAll(".timeline-point");
-  const labels = chart.querySelectorAll(".x-labels span");
-  const tooltip = document.getElementById("timeline-tooltip");
+  chart.querySelectorAll(".timeline-slot-label").forEach((label) => {
 
-  points.forEach((point) => {
-    const slotIndex = Number(point.dataset.slot);
-    const data = TIMELINE_DATA[slotIndex];
-
-    point.addEventListener("mouseenter", (event) => {
-      point.setAttribute("r", "8");
-      showTimelineTooltip(event, data, tooltip, chart);
-    });
-
-    point.addEventListener("mousemove", (event) => {
-      showTimelineTooltip(event, data, tooltip, chart);
-    });
-
-    point.addEventListener("mouseleave", () => {
-      point.setAttribute("r", "6");
-      tooltip.style.display = "none";
-    });
-
-    point.addEventListener("click", (event) => {
-      event.stopPropagation();
-      selectTimelineSlot(slotIndex, chart);
-    });
-  });
-
-  labels.forEach((label) => {
     const slotIndex = Number(label.dataset.slot);
 
-    label.style.cursor = "pointer";
-
     label.addEventListener("click", () => {
-      selectTimelineSlot(slotIndex, chart);
+
+      selectedTimeSlot = slotIndex;
+
+      chart.querySelectorAll(".timeline-slot-label").forEach((el) => {
+        el.classList.remove("active");
+      });
+
+      label.classList.add("active");
+
+      showTimelineComments(slotIndex);
     });
   });
-}
 
-function selectTimelineSlot(slotIndex, chart) {
-  selectedTimeSlot = slotIndex;
-  showTimelineComments(slotIndex);
+  // 처음 진입 시 첫 시간대 자동 선택
+  if (selectedTimeSlot === null) {
+    selectedTimeSlot = 0;
 
-  chart.querySelectorAll(".timeline-point").forEach((point) => {
-    point.classList.remove("selected");
-  });
+    const first = chart.querySelector(`.timeline-slot-label[data-slot="0"]`);
 
-  chart.querySelectorAll(`[data-slot="${slotIndex}"]`).forEach((element) => {
-    if (element.classList.contains("timeline-point")) {
-      element.classList.add("selected");
+    if (first) {
+      first.classList.add("active");
     }
-  });
-}
 
-function showTimelineTooltip(event, data, tooltip, chart) {
-  tooltip.innerHTML = `
-    <div class="timeline-tooltip-label">${data.label}</div>
-    ${renderTimelineTooltipRow("green", "AI 발전 긍정적", data.positive)}
-    ${renderTimelineTooltipRow("red", "AI 위험 우려", data.danger)}
-    ${renderTimelineTooltipRow("blue", "현실적 접근 필요", data.realistic)}
-    ${renderTimelineTooltipRow("purple", "중립적/기타", data.neutral)}
-    <div class="timeline-tooltip-hint">클릭하면 댓글을 볼 수 있습니다</div>
-  `;
-
-  const rect = chart.getBoundingClientRect();
-
-  let x = event.clientX - rect.left + 15;
-  let y = event.clientY - rect.top + 15;
-
-  const tooltipWidth = 220;
-  const tooltipHeight = 180;
-
-  if (x + tooltipWidth > rect.width) {
-    x = event.clientX - rect.left - tooltipWidth - 15;
+    showTimelineComments(0);
   }
-
-  if (y + tooltipHeight > rect.height) {
-    y = event.clientY - rect.top - tooltipHeight - 15;
-  }
-
-  tooltip.style.left = `${x}px`;
-  tooltip.style.top = `${y}px`;
-  tooltip.style.display = "block";
 }
 
-function renderTimelineTooltipRow(colorClass, label, percent) {
-  return `
-    <div class="timeline-tooltip-row">
-      <span class="dot ${colorClass}"></span>
-      <span>${label}</span>
-      <strong>${percent}%</strong>
-    </div>
-  `;
-}
 
 function showTimelineComments(slotIndex) {
-  const data = TIMELINE_DATA[slotIndex];
+  const timelineData = getTimelineData();
+
+  const slot = timelineData[slotIndex];
+
   const container = document.getElementById("timeline-comments");
-  if (!container) return;
+
+  if (!slot || !container) return;
 
   container.innerHTML = `
     <div class="timeline-comments-header">
-      <h3>📊 ${data.label} 여론별 댓글</h3>
-      <button class="timeline-comments-close">×</button>
+      <h3>${slot.label} 대표 댓글</h3>
     </div>
+
     <div class="timeline-comments-grid">
-      ${renderCommentGroup("AI 발전 긍정적", data.comments.positive, "#4ade80", "green")}
-      ${renderCommentGroup("AI 위험 우려", data.comments.danger, "#f87171", "red")}
-      ${renderCommentGroup("현실적 접근 필요", data.comments.realistic, "#818cf8", "blue")}
-      ${renderCommentGroup("중립적/기타", data.comments.neutral, "#a267f5", "purple")}
+      ${slot.values.map((value) => `
+        <div class="comment-group">
+
+          <h4 style="color:${value.color}">
+            ${value.label}
+            (${value.percent}%)
+          </h4>
+
+          <div class="comment-list">
+            ${(value.comments || []).map((comment) => `
+              <div class="comment-item">
+                ${comment}
+              </div>
+            `).join("")}
+          </div>
+
+        </div>
+      `).join("")}
     </div>
   `;
 
   container.style.display = "block";
-
-  container.querySelector(".timeline-comments-close").addEventListener("click", () => {
-    container.style.display = "none";
-    selectedTimeSlot = null;
-
-    document.querySelectorAll(".timeline-point").forEach((point) => {
-      point.classList.remove("selected");
-    });
-  });
 }
 
 function renderCommentGroup(title, comments, color, colorClass) {
@@ -704,7 +773,17 @@ function openPanel(commentsArea) {
   });
 
   commentsArea.prepend(panel);
+
+  const videoId = getVideoId();
+
+  if (videoId) {
+    fetchAnalysis(videoId).then(() => {
+      rerenderPanel();
+    });
+  }
+
   initCurrentTabEvents();
+
 }
 
 function renderPanel() {
