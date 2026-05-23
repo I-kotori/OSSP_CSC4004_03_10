@@ -804,12 +804,40 @@ function renderVideosTab() {
 }
 
 function renderBalanceTab() {
+
+  if (!analysisData?.clusters?.length) {
+
+    return `
+      <div class="analysis-box">
+        <h3>의견 데이터 없음</h3>
+      </div>
+    `;
+  }
+
+  const colors = [
+    "green",
+    "red",
+    "blue",
+    "purple",
+    "gray",
+  ];
+
   return `
     <div class="balance-grid">
-      ${balanceCard("green", "AI 발전 긍정적", "AI가 반복 업무를 줄이고 더 창의적인 일에 집중하게 해줄 것 같아요.", "공감 1.8K")}
-      ${balanceCard("red", "AI 위험 우려", "기술 발전은 좋지만 개인정보와 일자리 문제는 반드시 같이 논의해야 합니다.", "공감 1.2K")}
-      ${balanceCard("blue", "현실적 접근 필요", "무조건 찬반으로 나누기보다 교육과 제도 준비가 먼저라고 생각합니다.", "공감 980")}
-      ${balanceCard("gray", "중립적/기타", "아직 판단하기 어렵지만 앞으로 어떤 변화가 생길지 궁금합니다.", "공감 640")}
+
+      ${analysisData.clusters.map((cluster, index) => {
+
+        const color = colors[index % colors.length];
+
+        return balanceCard(
+          color,
+          cluster.label,
+          cluster.summary || "요약 데이터 없음",
+          `${cluster.percent}% · ${cluster.comment_count.toLocaleString()}개 댓글`
+        );
+
+      }).join("")}
+
     </div>
   `;
 }
@@ -907,9 +935,22 @@ function initVideoEvents() {
 function balanceCard(color, title, comment, reaction) {
   return `
     <div class="balance-card ${color}">
-      <h3><span class="dot ${color}"></span>${title}</h3>
+
+      <div class="balance-card-header">
+
+      <h3>
+        <span class="dot ${color}"></span>
+        ${title}
+      </h3>
+
+      <div class="balance-percent ${color}">
+        ${reaction}
+      </div>
+
+    </div>
+
       <p>${comment}</p>
-      <span>${reaction}</span>
+
     </div>
   `;
 }
