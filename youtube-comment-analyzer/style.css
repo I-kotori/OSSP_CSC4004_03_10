@@ -165,6 +165,22 @@
   color: #818cf8;
 }
 
+.summary-card.purple {
+  border-color: rgba(162, 103, 245, 0.35);
+}
+
+.summary-card.purple strong {
+  color: #a267f5;
+}
+
+.summary-card.gray {
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.summary-card.gray strong {
+  color: #94a3b8;
+}
+
 /* ─────────────────────────────
    탭
 ───────────────────────────── */

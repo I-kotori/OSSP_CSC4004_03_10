@@ -904,31 +904,35 @@ function renderPanel() {
       </div>
 
       <button class="analysis-close">×</button>
+      </div>
+
+      <div class="analysis-summary">
+
+    <div class="summary-card total-card">
+      <p>총 댓글</p>
+      <strong>${totalComments}</strong>
     </div>
 
-    <div class="analysis-summary">
+    ${(analysisData?.clusters || []).map((cluster, index) => {
 
-      <div class="summary-card">
-        <p>총 댓글</p>
-        <strong>${totalComments}</strong>
-      </div>
+      const colors = [
+        "positive",
+        "negative",
+        "neutral",
+        "purple",
+        "gray",
+      ];
 
-      <div class="summary-card positive">
-        <p>긍정적</p>
-        <strong>${positive}%</strong>
-      </div>
+      return `
+        <div class="summary-card ${colors[index % colors.length]}">
+          <p>${cluster.label}</p>
+          <strong>${cluster.percent}%</strong>
+        </div>
+      `;
 
-      <div class="summary-card negative">
-        <p>부정적</p>
-        <strong>${negative}%</strong>
-      </div>
+    }).join("")}
 
-      <div class="summary-card neutral">
-        <p>중립적</p>
-        <strong>${neutral}%</strong>
-      </div>
-
-    </div>
+  </div>
 
     <div class="analysis-tabs">
       ${tabs.map((tab) => `
