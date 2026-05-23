@@ -118,6 +118,9 @@ async function fetchAnalysis(videoId) {
 
     if (data.result) {
       analysisData = data.result;
+
+      await loadClusterVideos();
+
       analysisLoading = false;
 
       const panel = document.querySelector(".yt-comment-analysis-panel");
@@ -245,6 +248,8 @@ async function pollJob(jobId) {
         console.log("clusters:", data.result?.clusters);
 
         analysisData = data.result;
+
+        await loadClusterVideos();
 
         analysisLoading = false;
 
@@ -723,21 +728,79 @@ function renderCommentGroup(title, comments, color, colorClass) {
   `;
 }
 
+async function fetchClusterVideos(cluster) {
+
+  try {
+
+    const query = `
+      ${cluster.label}
+      ${(cluster.tags || []).join(" ")}
+    `.trim();
+
+    const response = await fetch(
+      `${API_BASE}/youtube/search?q=${encodeURIComponent(query)}`
+    );
+
+    const data = await response.json();
+
+    return data.videos || [];
+
+  } catch (error) {
+
+    console.error("영상 추천 실패:", error);
+
+    return [];
+  }
+}
+
+async function loadClusterVideos() {
+
+  if (!analysisData?.clusters) return;
+
+  await Promise.all(
+
+    analysisData.clusters.map(async (cluster) => {
+
+      const videos = await fetchClusterVideos(cluster);
+
+      cluster.videos = videos;
+
+    })
+
+  );
+
+}
+
 function renderVideosTab() {
-  return `
-    ${videoSection("green", "AI 발전 긍정적", "2개 영상", [
-      ["AI가 만드는 미래 사회 - 인류의 새로운 도약", "미래기술연구소", "1.2M", "52K"],
-      ["생산성 혁명: AI로 달라지는 업무 환경", "비즈니스 인사이트", "856K", "38K"],
-    ])}
-    ${videoSection("red", "AI 위험 우려", "2개 영상", [
-      ["AI 기술의 어두운 면 - 우리가 간과한 위험들", "테크 비평", "890K", "32K"],
-      ["AI 발전이 가져올 일자리 문제의 진실", "경제 전문가TV", "423K", "19K"],
-    ])}
-    ${videoSection("blue", "현실적 접근 필요", "2개 영상", [
-      ["AI 시대를 준비하는 현실적인 방법", "에듀 테크", "642K", "27K"],
-      ["정책과 교육이 함께 가야 하는 이유", "시사 연구소", "318K", "12K"],
-    ])}
-  `;
+
+  if (!analysisData?.clusters?.length) {
+
+    return `
+      <div class="analysis-box">
+        <h3>추천 영상 없음</h3>
+      </div>
+    `;
+  }
+
+  const colors = [
+    "green",
+    "red",
+    "blue",
+    "purple",
+    "gray",
+  ];
+
+  return analysisData.clusters.map((cluster, index) => {
+
+    const color = colors[index % colors.length];
+
+    return videoSection(
+      color,
+      cluster,
+      cluster.videos || []
+    );
+
+  }).join("");
 }
 
 function renderBalanceTab() {
@@ -751,31 +814,94 @@ function renderBalanceTab() {
   `;
 }
 
-function videoSection(color, title, count, videos) {
+function videoSection(color, cluster, videos) {
+
   return `
     <div class="video-section ${color}">
+
       <div class="video-section-header">
-        <h3>${title}</h3>
-        <span>${count}</span>
-      </div>
-      <div class="video-list">
-        ${videos.map((video) => `
-          <div class="video-card">
-            <div class="video-thumb"></div>
-            <div class="video-info">
-              <strong>${video[0]}</strong>
-              <p>${video[1]}</p>
-              <div>
-                <span>◉ ${video[2]}</span>
-                <span>♡ ${video[3]}</span>
-              </div>
-            </div>
-            <button>↗ 열기</button>
+
+        <div>
+
+          <h3>${cluster.label}</h3>
+
+          <div class="video-section-desc">
+            ${cluster.summary || ""}
           </div>
-        `).join("")}
+
+        </div>
+
+        <span>${videos.length}개 영상</span>
+
       </div>
+
+      <div class="video-list">
+
+        ${videos.length
+          ? videos.map((video) => `
+
+            <div class="video-card">
+
+              <img
+                class="video-thumb"
+                src="${video.thumbnail}"
+                alt="${video.title}"
+              />
+
+              <div class="video-info">
+
+                <strong>${video.title}</strong>
+
+                <p>${video.channel}</p>
+
+                <div class="video-meta">
+                  <span>조회수 ${video.views}</span>
+                  <span>👍 ${video.likes}</span>
+                </div>
+
+              </div>
+
+              <button
+                class="video-open-btn"
+                data-url="${video.url}"
+              >
+                ↗ 열기
+              </button>
+
+            </div>
+
+          `).join("")
+
+          : `
+            <div class="video-empty">
+              추천 영상이 없습니다.
+            </div>
+          `
+        }
+
+      </div>
+
     </div>
   `;
+}
+
+function initVideoEvents() {
+
+  document.querySelectorAll(".video-open-btn")
+    .forEach((button) => {
+
+      button.addEventListener("click", () => {
+
+        const url = button.dataset.url;
+
+        if (url) {
+          window.open(url, "_blank");
+        }
+
+      });
+
+    });
+
 }
 
 function balanceCard(color, title, comment, reaction) {
@@ -959,6 +1085,12 @@ function initCurrentTabEvents() {
   if (currentTab === "timeline") {
     setTimeout(initTimelineEvents, 50);
   }
+
+  if (currentTab === "videos") {
+    setTimeout(initVideoEvents, 50);
+  }
+
+
 }
 
 function closePanel() {

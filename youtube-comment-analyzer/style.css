@@ -740,6 +740,69 @@
   overflow: hidden;
 }
 
+.video-section-desc {
+  margin-top: 8px;
+
+  color: #a8a8a8;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.video-meta {
+  display: flex;
+  gap: 12px;
+
+  margin-top: 8px;
+
+  color: #9aa3b5;
+  font-size: 12px;
+}
+
+.video-open-btn {
+  border: none;
+
+  padding: 10px 14px;
+
+  border-radius: 10px;
+
+  background: #2d2d2d;
+  color: #fff;
+
+  font-weight: 700;
+
+  cursor: pointer;
+
+  transition: background 0.2s ease;
+}
+
+.video-open-btn:hover {
+  background: #404040;
+}
+
+.video-empty {
+  padding: 18px;
+
+  border: 1px dashed #3a3a3a;
+  border-radius: 12px;
+
+  text-align: center;
+
+  color: #888;
+}
+
+.video-thumb {
+  width: 150px;
+  height: 84px;
+
+  object-fit: cover;
+
+  border-radius: 10px;
+
+  background: #2a2a2a;
+
+  flex-shrink: 0;
+}
+
 .video-section.green {
   background: rgba(74,222,128,0.035);
   border: 1px solid rgba(74,222,128,0.16);
