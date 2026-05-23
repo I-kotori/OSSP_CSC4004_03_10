@@ -120,7 +120,46 @@ async function fetchAnalysis(videoId) {
       analysisData = data.result;
       analysisLoading = false;
 
-      rerenderPanel();
+      const panel = document.querySelector(".yt-comment-analysis-panel");
+
+if (panel) {
+
+  panel.innerHTML = renderPanel();
+
+  panel.querySelector(".analysis-close")
+    ?.addEventListener("click", () => {
+      closePanel();
+      isPanelOpen = false;
+    });
+
+  panel.querySelectorAll(".analysis-tabs button")
+    .forEach((button) => {
+
+      button.addEventListener("click", () => {
+
+        currentTab = button.dataset.tab;
+
+        panel.querySelectorAll(".analysis-tabs button")
+          .forEach((tabButton) => {
+
+            tabButton.classList.toggle(
+              "active",
+              tabButton.dataset.tab === currentTab
+            );
+
+          });
+
+        panel.querySelector(".analysis-body").innerHTML =
+          renderTabContent(currentTab);
+
+          initCurrentTabEvents();
+
+        });
+
+      });
+
+    initCurrentTabEvents();
+  }
 
       return;
     }
@@ -209,7 +248,46 @@ async function pollJob(jobId) {
 
         analysisLoading = false;
 
-        rerenderPanel();
+        const panel = document.querySelector(".yt-comment-analysis-panel");
+
+        if (panel) {
+
+          panel.innerHTML = renderPanel();
+
+          panel.querySelector(".analysis-close")
+            ?.addEventListener("click", () => {
+              closePanel();
+              isPanelOpen = false;
+            });
+
+          panel.querySelectorAll(".analysis-tabs button")
+            .forEach((button) => {
+
+              button.addEventListener("click", () => {
+
+                currentTab = button.dataset.tab;
+
+                panel.querySelectorAll(".analysis-tabs button")
+                  .forEach((tabButton) => {
+
+                    tabButton.classList.toggle(
+                      "active",
+                      tabButton.dataset.tab === currentTab
+                    );
+
+                  });
+
+                panel.querySelector(".analysis-body").innerHTML =
+                  renderTabContent(currentTab);
+
+                initCurrentTabEvents();
+
+              });
+
+            });
+
+          initCurrentTabEvents();
+        }
       }
 
       if (data.status === "failed") {
@@ -787,28 +865,77 @@ function openPanel(commentsArea) {
 }
 
 function renderPanel() {
+
+  const totalComments =
+    analysisData?.total_comments?.toLocaleString() || "-";
+
+  const clusters = analysisData?.clusters || [];
+
+  // 긍정 / 부정 / 중립 추출
+  const positive =
+    clusters.find((c) =>
+      c.label.includes("긍정")
+    )?.percent || 0;
+
+  const negative =
+    clusters.find((c) =>
+      c.label.includes("부정")
+    )?.percent || 0;
+
+  const neutral =
+    clusters.find((c) =>
+      c.label.includes("중립")
+    )?.percent || 0;
+
   return `
     <div class="analysis-header">
       <div class="analysis-title-wrap">
         <div class="analysis-logo">✦</div>
+
         <div>
-          <div class="analysis-title">댓글 여론 분석</div>
-          <div class="analysis-subtitle">8,432개 댓글을 벡터화하여 군집 분석 완료</div>
+          <div class="analysis-title">
+            댓글 여론 분석
+          </div>
+
+          <div class="analysis-subtitle">
+            ${totalComments}개 댓글을 벡터화하여 군집 분석 완료
+          </div>
         </div>
       </div>
+
       <button class="analysis-close">×</button>
     </div>
 
     <div class="analysis-summary">
-      <div class="summary-card"><p>총 댓글</p><strong>8,432</strong></div>
-      <div class="summary-card positive"><p>긍정적</p><strong>62%</strong></div>
-      <div class="summary-card negative"><p>부정적</p><strong>23%</strong></div>
-      <div class="summary-card neutral"><p>중립적</p><strong>15%</strong></div>
+
+      <div class="summary-card">
+        <p>총 댓글</p>
+        <strong>${totalComments}</strong>
+      </div>
+
+      <div class="summary-card positive">
+        <p>긍정적</p>
+        <strong>${positive}%</strong>
+      </div>
+
+      <div class="summary-card negative">
+        <p>부정적</p>
+        <strong>${negative}%</strong>
+      </div>
+
+      <div class="summary-card neutral">
+        <p>중립적</p>
+        <strong>${neutral}%</strong>
+      </div>
+
     </div>
 
     <div class="analysis-tabs">
       ${tabs.map((tab) => `
-        <button class="${currentTab === tab.id ? "active" : ""}" data-tab="${tab.id}">
+        <button
+          class="${currentTab === tab.id ? "active" : ""}"
+          data-tab="${tab.id}"
+        >
           ${tab.label}
         </button>
       `).join("")}
