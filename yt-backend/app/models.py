@@ -52,16 +52,3 @@ class PreloadRequest(BaseModel):
         description="미리 분석할 영상 ID 목록",
         example=["ztI95gJPdlk", "YeDePe7hJ4Q"]
     )
-
-# 찬홍 추가 - 비디오 부분 API
-
-class VideoResponse(BaseModel):
-    title: str = Field(..., description="유튜브 영상 제목")
-    channel: str = Field(..., description="채널명")
-    thumbnail: str = Field(..., description="영상 썸네일 URL")
-    views: str = Field(..., description="가공된 조회수 문자열 (예: 12만회)")
-    likes: str = Field(..., description="가공된 좋아요수 문자열 (예: 1.2만)")
-    url: str = Field(..., description="유튜브 영상 상세 URL")
-
-class YouTubeSearchResponse(BaseModel):
-    videos: List[VideoResponse] = Field(..., description="추천 영상 리스트")
