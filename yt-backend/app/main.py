@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv  # 추가
 
 load_dotenv()  # 추가
-from app.routers import analyze, status, preload
+from app.routers import analyze, status, preload, youtube # 찬홍 수정
 from app.database import init_db
 from app.pipeline import start_worker
 
@@ -40,6 +40,8 @@ app.add_middleware(
 app.include_router(analyze.router, prefix="/analyze", tags=["분석 요청"])
 app.include_router(status.router, prefix="/status", tags=["작업 상태"])
 app.include_router(preload.router, prefix="/preload", tags=["사전 처리 (관리용)"])
+# 찬홍 수정
+app.include_router(youtube.router, prefix="/youtube", tags=["유튜브 추천"])
 
 
 @app.on_event("startup")
