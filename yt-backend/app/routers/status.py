@@ -29,7 +29,7 @@ def get_job_status(job_id: str):
 
     result = None
     if job["status"] == "done":
-        result = get_cached_result(job["video_id"])
+        result = get_cached_result(job["video_id"], mark_cached=False)
 
     return JobResponse(
         job_id=job["job_id"],

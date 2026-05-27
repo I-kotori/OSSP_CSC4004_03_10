@@ -17,6 +17,7 @@
 import os
 import re
 import json
+import time
 import uuid
 import requests
 import numpy as np
@@ -27,6 +28,8 @@ from app.database import get_conn
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "gemma4:e4b")
+def _serialize_clusters(clusters: list) -> list:
+    return [{k: v for k, v in c.items() if k != "source_ids"} for c in clusters]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -132,6 +135,8 @@ def embed_comments(texts: list):
     # TODO: 아래 주석 해제 후 사용
     from sentence_transformers import SentenceTransformer
     model = SentenceTransformer('jhgan/ko-sroberta-multitask')
+     # KoSimCSE-roberta 사용해봤는데 별로였음.
+     # jhgan/ho-sroberta-multitask 대비 군집이 덜 나옴.
     return model.encode(texts, show_progress_bar=True, batch_size=32)
 
     # Mock: 랜덤 벡터
@@ -161,11 +166,11 @@ def find_best_eps(embeddings, min_samples: int) -> float:
         # 댓글 수에 따라 상한 다르게 클램핑
         n = len(embeddings)
         if n < 500:
-            return max(0.1, min(0.25, eps))
+            return max(0.15, min(0.25, eps))
         elif n < 2000:
-            return max(0.1, min(0.30, eps))
+            return max(0.2, min(0.30, eps))
         else:
-            return max(0.1, min(0.35, eps))
+            return max(0.25, min(0.35, eps))
 
     except Exception:
         n = len(embeddings)
@@ -198,7 +203,7 @@ def cluster_comments(embeddings) -> list:
     elif n < 2000:
         min_samples = max(10, int(n * 0.01))
     else:
-        min_samples = max(15, min(30, int(n * 0.008)))
+        min_samples = max(15, min(20, int(n * 0.008)))
 
     eps = find_best_eps(embeddings, min_samples)
     print(f"[DBSCAN] n={n}, eps={eps:.3f}, min_samples={min_samples}")
@@ -339,7 +344,9 @@ def label_clusters(texts: list, labels: list) -> list:
             top_comments = sorted(cluster_texts, key=len, reverse=False)[:5]
 
         if is_noise:
-            info = {"label": "분류 안 됨", "summary": None, "sentiment": "neutral", "tags": []}
+            print(f"[라벨링] 노이즈 ({count}개) gemma4:e4b 호출 중...")
+            info = label_cluster_with_llm(top_comments)
+            info["label"] = "분류 안 됨"  # 라벨은 고정, summary/tags는 LLM이 생성
         else:
             print(f"[라벨링] 군집 {label_id} ({count}개) gemma4:e4b 호출 중...")
             info = label_cluster_with_llm(top_comments)
@@ -353,6 +360,7 @@ def label_clusters(texts: list, labels: list) -> list:
             "comment_count": count,
             "top_comments": top_comments,
             "tags": info["tags"],
+            "source_ids": ["noise"] if is_noise else [f"cluster_{label_id}"],  # 추가
         })
 
     # 크기순 정렬, 노이즈는 맨 뒤
@@ -385,11 +393,13 @@ def merge_small_clusters(clusters: list, target: int = 4) -> list:
     merged = {
         "id": "others",
         "label": "기타 의견",
+        "summary": None,
         "sentiment": "neutral",
         "percent": round(sum(c["percent"] for c in others), 1),
         "comment_count": sum(c["comment_count"] for c in others),
         "top_comments": [c for cl in others for c in cl["top_comments"]][:5],
         "tags": [],
+        "source_ids": [sid for cl in others for sid in cl.get("source_ids", [cl["id"]])],  # 추가
     }
 
     result = main + [merged]
@@ -475,7 +485,7 @@ def build_timeline(meta: list, labels: list, clusters: list) -> list:
 # 캐시 조회 / 저장
 # ─────────────────────────────────────────────────────────────
 
-def get_cached_result(video_id: str):
+def get_cached_result(video_id: str, mark_cached: bool = True):
     conn = get_conn()
     row = conn.execute(
         "SELECT result_json FROM analysis_cache WHERE video_id = ?",
@@ -484,7 +494,8 @@ def get_cached_result(video_id: str):
     conn.close()
     if row:
         result = json.loads(row["result_json"])
-        result["cached"] = True
+        result["clusters"] = _serialize_clusters(result.get("clusters", []))
+        result["cached"] = mark_cached
         return result
     return None
 
@@ -507,21 +518,50 @@ def save_result_to_cache(video_id: str, result: dict):
     conn.commit()
     conn.close()
 
-
 # ─────────────────────────────────────────────────────────────
 # 작업 상태 관리
 # ─────────────────────────────────────────────────────────────
 
-def create_job(video_id: str) -> str:
+def get_active_job(video_id: str):
+    conn = get_conn()
+    row = conn.execute("""
+        SELECT * FROM jobs WHERE video_id = ?
+        AND status IN ('pending', 'processing')
+        ORDER BY updated_at DESC LIMIT 1
+    """, (video_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def get_or_create_job(video_id: str):
+    active_job = get_active_job(video_id)
+    if active_job:
+        return active_job, False
+
     job_id = str(uuid.uuid4())
     conn = get_conn()
-    conn.execute(
-        "INSERT INTO jobs (job_id, video_id, status, progress) VALUES (?, ?, 'pending', 0)",
-        (job_id, video_id),
-    )
-    conn.commit()
-    conn.close()
-    return job_id
+    try:
+        conn.execute(
+            "INSERT INTO jobs (job_id, video_id, status, progress) VALUES (?, ?, 'pending', 0)",
+            (job_id, video_id),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        row = conn.execute("""
+            SELECT * FROM jobs WHERE video_id = ?
+            AND status IN ('pending', 'processing')
+            ORDER BY updated_at DESC LIMIT 1
+        """, (video_id,)).fetchone()
+        conn.close()
+        if row:
+            return dict(row), False
+        raise
+    else:
+        conn.close()
+        return {
+            "job_id": job_id, "video_id": video_id,
+            "status": "pending", "progress": 0, "message": None
+        }, True
 
 
 def update_job(job_id: str, status: str, progress: int, message: str = None):
@@ -564,30 +604,47 @@ def unload_ollama_model():
 # ─────────────────────────────────────────────────────────────
 
 def _run_analysis_internal(job_id: str, video_id: str):
+    pipeline_start = time.time()
+
+    def log_step(step: str, step_start: float = None):
+        now = time.time()
+        elapsed = now - pipeline_start
+        if step_start:
+            print(f"[{elapsed:.1f}s] {step} (단계: {now - step_start:.1f}s)")
+        else:
+            print(f"[{elapsed:.1f}s] {step}")
+        return now
+
     try:
+        t = log_step("댓글 수집 시작")
         update_job(job_id, "processing", 10, "댓글 수집 중...")
         comments_data = fetch_comments(video_id)
+        t = log_step(f"댓글 수집 완료 ({len(comments_data)}개)", t)
 
         update_job(job_id, "processing", 20, "텍스트 정제 중...")
         texts, meta = clean_comments(comments_data)
+        t = log_step(f"정제 완료 ({len(texts)}개)", t)
+
         if not texts:
             update_job(job_id, "failed", 0, "정제 후 유효한 댓글이 없습니다.")
             return
-
         if len(texts) < 50:
             update_job(job_id, "failed", 0, "댓글이 너무 적어 분석이 어렵습니다. (최소 50개 필요)")
             return
 
         update_job(job_id, "processing", 35, f"임베딩 중... ({len(texts)}개, CPU라 시간이 걸려요)")
         embeddings = embed_comments(texts)
+        t = log_step("임베딩 완료", t)
 
         update_job(job_id, "processing", 65, "DBSCAN 군집화 중...")
         labels = cluster_comments(embeddings)
         n_clusters = len(set(l for l in labels if l != -1))
+        t = log_step(f"군집화 완료 ({n_clusters}개)", t)
 
         update_job(job_id, "processing", 75, f"군집 라벨 생성 중... ({n_clusters}개 군집, gemma4:e4b 호출)")
         clusters = label_clusters(texts, labels)
-        unload_ollama_model()  # 라벨링 끝나면 즉시 언로드
+        unload_ollama_model()
+        t = log_step("라벨링 완료", t)
 
         update_job(job_id, "processing", 88, "군집 정리 중...")
         clusters = merge_small_clusters(clusters, target=4)
@@ -595,18 +652,20 @@ def _run_analysis_internal(job_id: str, video_id: str):
         update_job(job_id, "processing", 93, "시간대별 분석 중...")
         timeline = build_timeline(meta, labels, clusters)
 
+        public_clusters = _serialize_clusters(clusters)
         result = {
             "video_id": video_id,
             "video_title": f"영상 ({video_id})",
             "total_comments": len(texts),
             "cluster_count": len([c for c in clusters if c["id"] not in ("noise", "others")]),
-            "clusters": clusters,
+            "clusters": public_clusters,
             "timeline": timeline,
             "analyzed_at": datetime.now(timezone.utc).isoformat(),
             "cached": False,
         }
 
         save_result_to_cache(video_id, result)
+        log_step(f"전체 완료 (총 {time.time() - pipeline_start:.1f}초)")
         update_job(job_id, "done", 100, "분석 완료")
 
     except Exception as e:

@@ -43,7 +43,6 @@ app.include_router(preload.router, prefix="/preload", tags=["사전 처리 (관�
 # 찬홍 수정
 app.include_router(youtube.router, prefix="/youtube", tags=["유튜브 추천"])
 
-
 @app.on_event("startup")
 def on_startup():
     init_db()
