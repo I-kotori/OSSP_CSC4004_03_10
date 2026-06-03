@@ -3,7 +3,7 @@ import json
 import os
 import re
 import requests
-from collections import Counter
+from collections import Counter, defaultdict
 from fastapi import APIRouter, HTTPException, Query
 from app.database import get_conn
 from app.models import YouTubeSearchResponse, VideoResponse
@@ -49,9 +49,13 @@ CONTEXT_STOPWORDS = QUERY_STOPWORDS | {
     "논리", "주장합니다", "비판하고", "있다", "있습니다", "통합반대",
     "다같", "다같이", "다들", "무슨", "얘기", "있나",
     "입니다", "있습니다", "없습니다",
+    "오늘부터", "현실", "가입되는", "가입되", "완벽합니다", "통신",
 }
 
 DOMAIN_CONTEXT_KEYWORDS = [
+    "통신3사", "통신사", "통합요금제", "요금제", "무제한", "5G",
+    "스타링크", "모바일", "휴대폰", "다이렉트투셀",
+    "아스날", "PSG", "이강인", "챔스", "UCL",
     "민영화", "민영화의혹", "적자", "재정", "재정위험",
     "하향평준화", "재분배", "사회주의",
     "대구경북", "대구", "경북", "공항", "TK",
@@ -69,7 +73,7 @@ def _normalize_query_token(token: str) -> str:
         return "사회주의"
     if token.startswith("하향평준화"):
         return "하향평준화"
-    for ending in ("했습니다", "합니다", "됩니다", "하라고", "하자는", "하자", "했다", "한다", "하는", "하면", "해서", "하지"):
+    for ending in ("했습니다", "합니다", "됩니다", "하라고", "하자는", "하자", "했다", "한다", "하는", "되는", "된다고", "쓰나", "쓰냐", "라고", "하면", "해서", "하지"):
         if token.endswith(ending) and len(token) > len(ending) + 1:
             token = token[: -len(ending)]
             break
@@ -81,6 +85,10 @@ def _normalize_query_token(token: str) -> str:
         token = token[:-1]
     if len(token) > 2 and token[-1] in "은는이가을를에의도만":
         token = token[:-1]
+    for particle in ("으로", "이나"):
+        if token.endswith(particle) and len(token) > len(particle) + 1:
+            token = token[: -len(particle)]
+            break
     return token
 
 
@@ -158,10 +166,10 @@ def _domain_context_rank(token: str) -> int:
     return 999
 
 
-def _find_cached_cluster_context(raw_query: str) -> str:
+def _find_cached_cluster_match(raw_query: str) -> dict | None:
     raw_tokens = set(_tokenize_search_text(raw_query))
     if not raw_tokens:
-        return ""
+        return None
 
     conn = get_conn()
     try:
@@ -175,7 +183,7 @@ def _find_cached_cluster_context(raw_query: str) -> str:
         conn.close()
 
     best_score = 0
-    best_context = ""
+    best_match = None
     for row in rows:
         try:
             result = json.loads(row["result_json"])
@@ -199,9 +207,18 @@ def _find_cached_cluster_context(raw_query: str) -> str:
                 continue
 
             best_score = score
-            best_context = _weighted_cluster_query_text(video_title, cluster)
+            best_match = {
+                "video_title": video_title,
+                "cluster": cluster,
+                "context": _weighted_cluster_query_text(video_title, cluster),
+            }
 
-    return best_context if best_score > 0 else ""
+    return best_match if best_score > 0 else None
+
+
+def _find_cached_cluster_context(raw_query: str) -> str:
+    match = _find_cached_cluster_match(raw_query)
+    return match.get("context", "") if match else ""
 
 
 def _expand_query_with_cached_context(raw_query: str, search_query: str) -> str:
@@ -263,8 +280,90 @@ def _append_unique_query(queries: list[str], query: str):
         queries.append(query)
 
 
+def _join_query_tokens(tokens: list[str], limit: int = 6) -> str:
+    result = []
+    seen = set()
+    for token in tokens:
+        key = token.lower()
+        if key in seen or key in CONTEXT_STOPWORDS:
+            continue
+        seen.add(key)
+        result.append(token)
+        if len(result) >= limit:
+            break
+    return " ".join(result)
+
+
+def _collect_context_token_scores(video_title: str, cluster: dict) -> tuple[Counter, dict[str, set[str]]]:
+    scores = Counter()
+    sources = defaultdict(set)
+
+    def add(text: str, weight: int, source: str):
+        for token in _tokenize_search_text(text, dedupe=False):
+            key = token.lower()
+            if key in CONTEXT_STOPWORDS or token in CONTEXT_STOPWORDS:
+                continue
+            scores[token] += weight
+            sources[token].add(source)
+
+    add(video_title, 6, "title")
+    add(" ".join(cluster.get("tags") or []), 7, "cluster")
+    add(cluster.get("label", ""), 5, "cluster")
+    add(cluster.get("summary", ""), 2, "cluster")
+    add(" ".join(cluster.get("top_comments") or []), 2, "cluster")
+    return scores, sources
+
+
+def _rank_context_tokens(scores: Counter, sources: dict[str, set[str]]) -> list[str]:
+    return sorted(
+        scores,
+        key=lambda token: (
+            0 if _is_domain_context_token(token) else 1,
+            _domain_context_rank(token),
+            0 if "cluster" in sources[token] else 1,
+            -scores[token],
+            len(token),
+            token,
+        ),
+    )
+
+
+def _contextual_query_candidates(raw_query: str, search_query: str) -> list[str]:
+    match = _find_cached_cluster_match(raw_query)
+    if not match:
+        return []
+
+    video_title = match.get("video_title", "")
+    cluster = match.get("cluster") or {}
+    scores, sources = _collect_context_token_scores(video_title, cluster)
+    ranked = _rank_context_tokens(scores, sources)
+    if not ranked:
+        return []
+
+    title_tokens = [token for token in ranked if "title" in sources[token]]
+    cluster_tokens = [token for token in ranked if "cluster" in sources[token]]
+
+    queries = []
+    _append_unique_query(queries, _join_query_tokens(cluster_tokens[:4], limit=4))
+    _append_unique_query(queries, _join_query_tokens(title_tokens[:3] + cluster_tokens[:3]))
+    _append_unique_query(queries, _join_query_tokens(title_tokens[:2] + _tokenize_search_text(search_query)[:3], limit=5))
+    _append_unique_query(queries, _join_query_tokens(ranked[:5], limit=5))
+    _append_unique_query(queries, _join_query_tokens(title_tokens[:4], limit=4))
+
+    logger.info(
+        "[YouTube] 캐시 기반 검색 후보 생성: raw_q=%s, video_title=%s, candidates=%s",
+        raw_query,
+        video_title,
+        queries,
+    )
+    return queries
+
+
 def _search_query_candidates(raw_query: str, search_query: str) -> list[str]:
     queries = []
+    for query in _contextual_query_candidates(raw_query, search_query):
+        _append_unique_query(queries, query)
+
     _append_unique_query(queries, search_query)
 
     tokens = _tokenize_search_text(search_query)
@@ -315,6 +414,30 @@ def _is_weak_search_query(q: str) -> bool:
     if len(tokens) == 1 and tokens[0] in BROAD_SINGLE_TOKEN_QUERIES:
         return True
     return not re.search(r"[가-힣a-zA-Z0-9]", compact)
+
+
+def _filter_relevant_search_items(items: list[dict], query: str) -> list[dict]:
+    query_tokens = {
+        token.lower()
+        for token in _tokenize_search_text(query)
+        if token.lower() not in CONTEXT_STOPWORDS
+    }
+    if not query_tokens:
+        return items
+
+    relevant_items = []
+    for item in items:
+        snippet = item.get("snippet", {})
+        target_text = " ".join([
+            snippet.get("title", ""),
+            snippet.get("channelTitle", ""),
+            snippet.get("description", ""),
+        ])
+        target_tokens = {token.lower() for token in _tokenize_search_text(target_text)}
+        if query_tokens & target_tokens:
+            relevant_items.append(item)
+
+    return relevant_items
 
 
 def _refine_query_with_llm(q: str) -> str:
@@ -407,8 +530,14 @@ def search_youtube_videos(q: str = Query(..., description="검색 쿼리 스트�
                 raise HTTPException(status_code=search_response.status_code, detail="YouTube Search API 호출에 실패했습니다.")
 
             search_data = search_response.json()
-            items = search_data.get("items", [])
-            logger.info("[YouTube] 검색 후보 결과: q=%s, count=%s", candidate, len(items))
+            raw_items = search_data.get("items", [])
+            items = _filter_relevant_search_items(raw_items, candidate)
+            logger.info(
+                "[YouTube] 검색 후보 결과: q=%s, raw_count=%s, relevant_count=%s",
+                candidate,
+                len(raw_items),
+                len(items),
+            )
             if items:
                 selected_query = candidate
                 break
