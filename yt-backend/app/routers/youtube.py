@@ -44,12 +44,28 @@ CONTEXT_STOPWORDS = QUERY_STOPWORDS | {
     "계획", "반대", "찬성", "통합", "여론", "라벨", "요약", "감성", "태그",
     "대한", "대해", "관련", "제안", "구조", "목적", "발생", "표출", "의견",
     "강한", "막대한", "사유화", "불신", "우려", "정리", "분석", "영상",
+    "제안된", "발생과", "목적이라", "특정", "사안", "댓글", "군집",
+    "논리", "주장합니다", "비판하고", "있다", "있습니다", "통합반대",
+    "다같", "다같이", "다들", "무슨", "얘기", "있나",
     "입니다", "있습니다", "없습니다",
 }
+
+DOMAIN_CONTEXT_KEYWORDS = [
+    "대구경북", "대구", "경북", "공항", "TK",
+    "민영화", "민영화의혹", "적자", "재정", "재정위험",
+    "하향평준화", "재분배", "사회주의",
+    "김해", "김포", "인천", "제주",
+]
 
 
 def _normalize_query_token(token: str) -> str:
     token = token.strip()
+    if token == "사회주":
+        return "사회주의"
+    if token.startswith("사회주의"):
+        return "사회주의"
+    if token.startswith("하향평준화"):
+        return "하향평준화"
     for ending in ("했습니다", "합니다", "됩니다", "하라고", "하자는", "하자", "했다", "한다", "하는", "하면", "해서", "하지"):
         if token.endswith(ending) and len(token) > len(ending) + 1:
             token = token[: -len(ending)]
@@ -65,7 +81,7 @@ def _normalize_query_token(token: str) -> str:
     return token
 
 
-def _tokenize_search_text(text: str) -> list[str]:
+def _tokenize_search_text(text: str, *, dedupe: bool = True) -> list[str]:
     query = re.sub(r"[^가-힣a-zA-Z0-9\s]", " ", text or "")
     tokens = []
     seen = set()
@@ -76,7 +92,7 @@ def _tokenize_search_text(text: str) -> list[str]:
             continue
         if key in QUERY_STOPWORDS:
             continue
-        if key in seen:
+        if dedupe and key in seen:
             continue
         seen.add(key)
         tokens.append(token)
@@ -105,6 +121,38 @@ def _cluster_query_text(cluster: dict) -> str:
         " ".join(cluster.get("top_comments") or []),
     ]
     return " ".join(part for part in parts if part)
+
+
+def _weighted_cluster_query_text(video_title: str, cluster: dict) -> str:
+    top_comments = " ".join(cluster.get("top_comments") or [])
+    tags = " ".join(cluster.get("tags") or [])
+    label = cluster.get("label", "")
+    summary = cluster.get("summary", "")
+    parts = []
+    if video_title:
+        parts.extend([video_title] * 5)
+    if tags:
+        parts.extend([tags] * 4)
+    if top_comments:
+        parts.extend([top_comments] * 3)
+    if label:
+        parts.extend([label] * 2)
+    if summary:
+        parts.append(summary)
+    return " ".join(parts)
+
+
+def _is_domain_context_token(token: str) -> bool:
+    upper_token = token.upper()
+    return any(keyword in token or keyword in upper_token for keyword in DOMAIN_CONTEXT_KEYWORDS)
+
+
+def _domain_context_rank(token: str) -> int:
+    upper_token = token.upper()
+    for idx, keyword in enumerate(DOMAIN_CONTEXT_KEYWORDS):
+        if keyword in token or keyword in upper_token:
+            return idx
+    return 999
 
 
 def _find_cached_cluster_context(raw_query: str) -> str:
@@ -148,10 +196,7 @@ def _find_cached_cluster_context(raw_query: str) -> str:
                 continue
 
             best_score = score
-            best_context = " ".join([
-                video_title,
-                _cluster_query_text(cluster),
-            ]).strip()
+            best_context = _weighted_cluster_query_text(video_title, cluster)
 
     return best_context if best_score > 0 else ""
 
@@ -163,12 +208,25 @@ def _expand_query_with_cached_context(raw_query: str, search_query: str) -> str:
 
     base_tokens = _tokenize_search_text(search_query)
     base_keys = {token.lower() for token in base_tokens}
-    context_counts = Counter(_tokenize_search_text(context))
+    context_counts = Counter(_tokenize_search_text(context, dedupe=False))
 
     additions = []
-    for token, _ in context_counts.most_common():
+    candidates = sorted(
+        context_counts.items(),
+        key=lambda item: (
+            0 if _is_domain_context_token(item[0]) else 1,
+            _domain_context_rank(item[0]),
+            -item[1],
+            len(item[0]),
+            item[0],
+        ),
+    )
+
+    for token, _ in candidates:
         key = token.lower()
         if key in base_keys or key in CONTEXT_STOPWORDS:
+            continue
+        if any(token in existing or existing in token for existing in additions):
             continue
         additions.append(token)
         if len(additions) >= 3:
