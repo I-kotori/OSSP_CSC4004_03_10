@@ -1,8 +1,11 @@
 import logging
+import json
 import os
 import re
 import requests
+from collections import Counter
 from fastapi import APIRouter, HTTPException, Query
+from app.database import get_conn
 from app.models import YouTubeSearchResponse, VideoResponse
 
 router = APIRouter()
@@ -37,32 +40,37 @@ QUERY_STOPWORDS = {
 
 BROAD_SINGLE_TOKEN_QUERIES = {"공항", "정치", "정부", "뉴스", "댓글", "여론"}
 
+CONTEXT_STOPWORDS = QUERY_STOPWORDS | {
+    "계획", "반대", "찬성", "통합", "여론", "라벨", "요약", "감성", "태그",
+    "대한", "대해", "관련", "제안", "구조", "목적", "발생", "표출", "의견",
+    "강한", "막대한", "사유화", "불신", "우려", "정리", "분석", "영상",
+    "입니다", "있습니다", "없습니다",
+}
 
-def _clean_search_query(q: str) -> str:
-    query = re.sub(r"\s+", " ", q or "").strip()
-    raw_has_generic = any(re.search(re.escape(phrase), query, flags=re.IGNORECASE) for phrase in GENERIC_QUERY_PHRASES)
-    for phrase in GENERIC_QUERY_PHRASES:
-        query = re.sub(re.escape(phrase), " ", query, flags=re.IGNORECASE)
 
-    query = re.sub(r"[^가-힣a-zA-Z0-9\s]", " ", query)
+def _normalize_query_token(token: str) -> str:
+    token = token.strip()
+    for ending in ("했습니다", "합니다", "됩니다", "하라고", "하자는", "하자", "했다", "한다", "하는", "하면", "해서", "하지"):
+        if token.endswith(ending) and len(token) > len(ending) + 1:
+            token = token[: -len(ending)]
+            break
+    for particle in ("으로", "이나"):
+        if token.endswith(particle) and len(token) > len(particle) + 1:
+            token = token[: -len(particle)]
+            break
+    if len(token) > 3 and token[-1] == "나":
+        token = token[:-1]
+    if len(token) > 2 and token[-1] in "은는이가을를에의도만":
+        token = token[:-1]
+    return token
+
+
+def _tokenize_search_text(text: str) -> list[str]:
+    query = re.sub(r"[^가-힣a-zA-Z0-9\s]", " ", text or "")
     tokens = []
     seen = set()
     for token in re.split(r"\s+", query):
-        token = token.strip()
-        if token.lower() in QUERY_STOPWORDS:
-            continue
-        for ending in ("했습니다", "합니다", "됩니다", "하라고", "하자는", "하자", "했다", "한다", "하는", "하면", "해서", "하지"):
-            if token.endswith(ending) and len(token) > len(ending) + 1:
-                token = token[: -len(ending)]
-                break
-        for particle in ("으로", "이나"):
-            if token.endswith(particle) and len(token) > len(particle) + 1:
-                token = token[: -len(particle)]
-                break
-        if len(token) > 3 and token[-1] == "나":
-            token = token[:-1]
-        if len(token) > 2 and token[-1] in "은는이가을를에의도만":
-            token = token[:-1]
+        token = _normalize_query_token(token)
         key = token.lower()
         if len(token) < 2 or len(token) > 12:
             continue
@@ -72,11 +80,112 @@ def _clean_search_query(q: str) -> str:
             continue
         seen.add(key)
         tokens.append(token)
+    return tokens
+
+
+def _clean_search_query(q: str, *, max_tokens: int = 4) -> str:
+    query = re.sub(r"\s+", " ", q or "").strip()
+    raw_has_generic = any(re.search(re.escape(phrase), query, flags=re.IGNORECASE) for phrase in GENERIC_QUERY_PHRASES)
+    for phrase in GENERIC_QUERY_PHRASES:
+        query = re.sub(re.escape(phrase), " ", query, flags=re.IGNORECASE)
+
+    tokens = _tokenize_search_text(query)
 
     if raw_has_generic and len(tokens) < 2:
         return ""
 
-    return " ".join(tokens[:4]).strip()
+    return " ".join(tokens[:max_tokens]).strip()
+
+
+def _cluster_query_text(cluster: dict) -> str:
+    parts = [
+        cluster.get("label", ""),
+        cluster.get("summary", ""),
+        " ".join(cluster.get("tags") or []),
+        " ".join(cluster.get("top_comments") or []),
+    ]
+    return " ".join(part for part in parts if part)
+
+
+def _find_cached_cluster_context(raw_query: str) -> str:
+    raw_tokens = set(_tokenize_search_text(raw_query))
+    if not raw_tokens:
+        return ""
+
+    conn = get_conn()
+    try:
+        rows = conn.execute("""
+            SELECT result_json
+            FROM analysis_cache
+            ORDER BY analyzed_at DESC
+            LIMIT 20
+        """).fetchall()
+    finally:
+        conn.close()
+
+    best_score = 0
+    best_context = ""
+    for row in rows:
+        try:
+            result = json.loads(row["result_json"])
+        except Exception:
+            continue
+
+        video_title = result.get("video_title") or ""
+        if re.fullmatch(r"영상\s*\([^)]+\)", video_title):
+            video_title = ""
+
+        for cluster in result.get("clusters", []):
+            if cluster.get("id") == "noise":
+                continue
+            label_text = " ".join([
+                cluster.get("label", ""),
+                " ".join(cluster.get("tags") or []),
+            ])
+            cluster_tokens = set(_tokenize_search_text(label_text))
+            score = len(raw_tokens & cluster_tokens)
+            if score <= best_score:
+                continue
+
+            best_score = score
+            best_context = " ".join([
+                video_title,
+                _cluster_query_text(cluster),
+            ]).strip()
+
+    return best_context if best_score > 0 else ""
+
+
+def _expand_query_with_cached_context(raw_query: str, search_query: str) -> str:
+    context = _find_cached_cluster_context(raw_query)
+    if not context:
+        return search_query
+
+    base_tokens = _tokenize_search_text(search_query)
+    base_keys = {token.lower() for token in base_tokens}
+    context_counts = Counter(_tokenize_search_text(context))
+
+    additions = []
+    for token, _ in context_counts.most_common():
+        key = token.lower()
+        if key in base_keys or key in CONTEXT_STOPWORDS:
+            continue
+        additions.append(token)
+        if len(additions) >= 3:
+            break
+
+    if not additions:
+        return search_query
+
+    expanded_tokens = (additions + base_tokens)[:6]
+    expanded = " ".join(expanded_tokens).strip()
+    logger.info(
+        "[YouTube] 캐시 문맥 기반 검색어 확장: raw_q=%s, base=%s, expanded=%s",
+        raw_query,
+        search_query,
+        expanded,
+    )
+    return expanded
 
 
 def _is_weak_search_query(q: str) -> bool:
@@ -141,9 +250,13 @@ def search_youtube_videos(q: str = Query(..., description="검색 쿼리 스트�
         logger.info("[YouTube] 분류 안 됨/noise 군집 추천 생략: raw_q=%s", raw_query)
         return {"videos": []}
 
-    search_query = _clean_search_query(raw_query)
+    search_query = _expand_query_with_cached_context(
+        raw_query,
+        _clean_search_query(raw_query),
+    )
     if _is_weak_search_query(search_query):
-        search_query = _clean_search_query(_refine_query_with_llm(raw_query))
+        refined_query = _clean_search_query(_refine_query_with_llm(raw_query))
+        search_query = _expand_query_with_cached_context(raw_query, refined_query)
 
     if _is_weak_search_query(search_query):
         logger.info("[YouTube] 검색어가 너무 일반적이라 추천 생략: raw_q=%s", raw_query)
@@ -159,7 +272,9 @@ def search_youtube_videos(q: str = Query(..., description="검색 쿼리 스트�
         "part": "snippet",
         "type": "video",
         "maxResults": 5,          # 익스텐션 UI에 보여줄 추천 영상 수
-        "videoEmbeddable": "true" # 웹/앱에 퍼가기(임베드) 가능한 영상만 필터링
+        "videoEmbeddable": "true", # 웹/앱에 퍼가기(임베드) 가능한 영상만 필터링
+        "relevanceLanguage": "ko",
+        "regionCode": "KR",
     }
     
     try:

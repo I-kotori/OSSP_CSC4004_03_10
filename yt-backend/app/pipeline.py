@@ -268,6 +268,30 @@ def fetch_comments(video_id: str) -> list:
     return comments_data
 
 
+def fetch_video_title(video_id: str) -> str:
+    from googleapiclient.discovery import build
+    fallback = f"영상 ({video_id})"
+    try:
+        api_key = os.getenv("YOUTUBE_API_KEY")
+        if not api_key:
+            return fallback
+
+        youtube = build("youtube", "v3", developerKey=api_key)
+        response = youtube.videos().list(
+            part="snippet",
+            id=video_id,
+            maxResults=1,
+        ).execute()
+        items = response.get("items", [])
+        if not items:
+            return fallback
+
+        return items[0].get("snippet", {}).get("title") or fallback
+    except Exception:
+        logger.exception("[YouTube] 영상 제목 조회 실패: video_id=%s", video_id)
+        return fallback
+
+
 # ─────────────────────────────────────────────────────────────
 # 2. 텍스트 정제
 # ─────────────────────────────────────────────────────────────
@@ -1293,6 +1317,7 @@ def _run_analysis_internal(job_id: str, video_id: str):
         t = log_step("댓글 수집 시작")
         update_job(job_id, "processing", 10, "댓글 수집 중...")
         comments_data = fetch_comments(video_id)
+        video_title = fetch_video_title(video_id)
         t = log_step(f"댓글 수집 완료 ({len(comments_data)}개)", t)
 
         update_job(job_id, "processing", 20, "텍스트 정제 중...")
@@ -1346,7 +1371,7 @@ def _run_analysis_internal(job_id: str, video_id: str):
         total_seconds = round(time.time() - pipeline_start, 3)
         result = {
             "video_id": video_id,
-            "video_title": f"영상 ({video_id})",
+            "video_title": video_title,
             "total_comments": len(texts),
             "cluster_count": len([c for c in clusters if c["id"] not in ("noise", "others")]),
             "clusters": public_clusters,
