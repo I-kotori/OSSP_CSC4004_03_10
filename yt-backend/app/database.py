@@ -35,6 +35,25 @@ def init_db():
         )
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS embedding_cache (
+            text_hash   TEXT NOT NULL,
+            model_name  TEXT NOT NULL,
+            dim         INTEGER NOT NULL,
+            embedding   BLOB NOT NULL,
+            text_preview TEXT,
+            hit_count   INTEGER DEFAULT 0,
+            created_at  TEXT DEFAULT (datetime('now')),
+            updated_at  TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (text_hash, model_name)
+        )
+    """)
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_embedding_cache_model
+        ON embedding_cache(model_name, updated_at)
+    """)
+
     # 같은 영상 중복 pending/processing 정리
     active_rows = cur.execute("""
         SELECT video_id, job_id FROM jobs
@@ -64,10 +83,26 @@ def init_db():
         WHERE status IN ('pending', 'processing')
     """)
 
+    # 서버 재시작 시 메모리 큐는 사라지므로 DB에 남은 active job은 복구할 수 없다.
+    # 그대로 두면 프론트가 죽은 job_id를 계속 폴링하므로 failed로 정리한다.
+    cur.execute("""
+        UPDATE jobs
+        SET status='failed',
+            progress=0,
+            message='서버 재시작으로 중단됨. 다시 분석을 요청해주세요.',
+            updated_at=datetime('now')
+        WHERE status IN ('pending', 'processing')
+    """)
+
     # 7일 지난 캐시 자동 만료
     cur.execute("""
         DELETE FROM analysis_cache
         WHERE analyzed_at < datetime('now', '-7 days')
+    """)
+
+    cur.execute("""
+        DELETE FROM embedding_cache
+        WHERE updated_at < datetime('now', '-30 days')
     """)
 
     conn.commit()
