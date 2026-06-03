@@ -34,6 +34,7 @@ QUERY_STOPWORDS = {
     "그냥", "진짜", "정말", "너무", "계속", "이제", "이미", "아직",
     "하는", "해서", "하면", "하고", "없는", "있는", "같은", "이런", "저런", "그런",
     "입니다", "합니다", "하세요", "마세요", "됩니다", "때문", "댓글", "영상", "의견",
+    "대한", "강력한", "재정적", "안됨",
     "절대", "그대로", "만드는", "둬라", "네버네버", "높아지겠지", "돈빼다가",
     "넘길려고", "하지", "잘해라", "먹여", "살리기", "그놈의", "그만하자",
 }
@@ -51,15 +52,17 @@ CONTEXT_STOPWORDS = QUERY_STOPWORDS | {
 }
 
 DOMAIN_CONTEXT_KEYWORDS = [
-    "대구경북", "대구", "경북", "공항", "TK",
     "민영화", "민영화의혹", "적자", "재정", "재정위험",
     "하향평준화", "재분배", "사회주의",
+    "대구경북", "대구", "경북", "공항", "TK",
     "김해", "김포", "인천", "제주",
 ]
 
 
 def _normalize_query_token(token: str) -> str:
     token = token.strip()
+    if re.fullmatch(r"\d+[분초시간일개월년]", token):
+        return ""
     if token == "사회주":
         return "사회주의"
     if token.startswith("사회주의"):
@@ -211,6 +214,10 @@ def _expand_query_with_cached_context(raw_query: str, search_query: str) -> str:
     context_counts = Counter(_tokenize_search_text(context, dedupe=False))
 
     additions = []
+    raw_has_redistribution_issue = any(
+        issue in raw_query or issue in search_query
+        for issue in ("하향평준화", "재분배", "사회주의")
+    )
     candidates = sorted(
         context_counts.items(),
         key=lambda item: (
@@ -225,6 +232,8 @@ def _expand_query_with_cached_context(raw_query: str, search_query: str) -> str:
     for token, _ in candidates:
         key = token.lower()
         if key in base_keys or key in CONTEXT_STOPWORDS:
+            continue
+        if raw_has_redistribution_issue and any(place in token.upper() for place in ("공항", "인천", "대구", "경북", "김해", "김포", "제주", "TK")):
             continue
         if any(token in existing or existing in token for existing in additions):
             continue
@@ -244,6 +253,58 @@ def _expand_query_with_cached_context(raw_query: str, search_query: str) -> str:
         expanded,
     )
     return expanded
+
+
+def _append_unique_query(queries: list[str], query: str):
+    query = re.sub(r"\s+", " ", query or "").strip()
+    if not query or _is_weak_search_query(query):
+        return
+    if query not in queries:
+        queries.append(query)
+
+
+def _search_query_candidates(raw_query: str, search_query: str) -> list[str]:
+    queries = []
+    _append_unique_query(queries, search_query)
+
+    tokens = _tokenize_search_text(search_query)
+    domain_tokens = [
+        token for token in tokens
+        if _is_domain_context_token(token) and token.lower() not in CONTEXT_STOPWORDS
+    ]
+    sentiment_tokens = [
+        token for token in tokens
+        if any(word in token for word in ("반대", "찬성", "우려", "비판", "의혹"))
+    ]
+    sentiment = sentiment_tokens[0] if sentiment_tokens else ""
+
+    topic = ""
+    for preferred in ("하향평준화", "재분배", "사회주의", "민영화", "적자", "공항"):
+        if any(preferred in token for token in tokens):
+            topic = preferred
+            break
+    if not topic and domain_tokens:
+        topic = domain_tokens[0]
+
+    has_airport = any("공항" in token for token in tokens)
+    has_integration = "통합" in tokens
+    if has_airport and has_integration and sentiment:
+        _append_unique_query(queries, f"공항 통합 {sentiment}")
+        _append_unique_query(queries, f"공항 {sentiment}")
+
+    if topic and sentiment:
+        if has_integration and topic in ("공항", "민영화", "적자"):
+            _append_unique_query(queries, f"{topic} 통합 {sentiment}")
+        _append_unique_query(queries, f"{topic} {sentiment}")
+    if len(domain_tokens) >= 2:
+        _append_unique_query(queries, " ".join(domain_tokens[:2] + ([sentiment] if sentiment else [])))
+    if topic and has_integration and topic in ("공항", "민영화", "적자"):
+        _append_unique_query(queries, f"{topic} 통합")
+
+    cleaned_raw = _clean_search_query(raw_query, max_tokens=5)
+    _append_unique_query(queries, cleaned_raw)
+
+    return queries[:4]
 
 
 def _is_weak_search_query(q: str) -> bool:
@@ -320,13 +381,13 @@ def search_youtube_videos(q: str = Query(..., description="검색 쿼리 스트�
         logger.info("[YouTube] 검색어가 너무 일반적이라 추천 생략: raw_q=%s", raw_query)
         return {"videos": []}
 
-    logger.info("[YouTube] 검색 요청: raw_q=%s, search_q=%s", raw_query, search_query)
+    search_queries = _search_query_candidates(raw_query, search_query)
+    logger.info("[YouTube] 검색 요청: raw_q=%s, candidates=%s", raw_query, search_queries)
 
     # 1. 1차 호출: 영상 검색 (search.list)
     search_url = "https://www.googleapis.com/youtube/v3/search"
     search_params = {
         "key": YOUTUBE_API_KEY,
-        "q": search_query,
         "part": "snippet",
         "type": "video",
         "maxResults": 5,          # 익스텐션 UI에 보여줄 추천 영상 수
@@ -336,16 +397,26 @@ def search_youtube_videos(q: str = Query(..., description="검색 쿼리 스트�
     }
     
     try:
-        search_response = requests.get(search_url, params=search_params)
-        if search_response.status_code != 200:
-            raise HTTPException(status_code=search_response.status_code, detail="YouTube Search API 호출에 실패했습니다.")
-            
-        search_data = search_response.json()
-        items = search_data.get("items", [])
-        
-        # 검색 결과가 없으면 빈 리스트 리턴
+        items = []
+        selected_query = ""
+        for candidate in search_queries:
+            params = dict(search_params)
+            params["q"] = candidate
+            search_response = requests.get(search_url, params=params)
+            if search_response.status_code != 200:
+                raise HTTPException(status_code=search_response.status_code, detail="YouTube Search API 호출에 실패했습니다.")
+
+            search_data = search_response.json()
+            items = search_data.get("items", [])
+            logger.info("[YouTube] 검색 후보 결과: q=%s, count=%s", candidate, len(items))
+            if items:
+                selected_query = candidate
+                break
+
         if not items:
             return {"videos": []}
+
+        logger.info("[YouTube] 검색 후보 선택: raw_q=%s, selected_q=%s", raw_query, selected_query)
             
         video_ids = [item["id"]["videoId"] for item in items]
         

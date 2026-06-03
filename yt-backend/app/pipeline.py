@@ -598,8 +598,14 @@ def label_cluster_with_llm(top_comments: list, fallback_texts: list = None) -> d
     user_prompt = (
         "다음 유튜브 댓글 군집의 핵심 여론을 분석해주세요.\n\n"
         f"댓글:\n{comments_str}\n\n"
+        "라벨 작성 규칙:\n"
+        "- label은 반드시 '무엇에 대한 어떤 입장' 형태로 작성하세요.\n"
+        "- '통합 반대'처럼 주어가 빠진 라벨은 금지합니다.\n"
+        "- 댓글에 보이는 핵심 대상(예: 공항, 민영화, 적자, 하향평준화, 재분배)을 label 또는 tags에 포함하세요.\n"
+        "- 좋은 예: '공항 통합 반대', '민영화 의혹', '적자 우려', '하향평준화 반대'\n"
+        "- 나쁜 예: '통합 대한 반대', '강력한 반대', '재정적 반대'\n\n"
         "아래 JSON 형식으로만 답하세요:\n"
-        '{"label": "10자 이내 핵심 라벨", '
+        '{"label": "16자 이내 대상 포함 라벨", '
         '"summary": "이 군집 여론을 한 문장으로 요약", '
         '"sentiment": "positive 또는 negative 또는 neutral 중 하나", '
         '"tags": ["키워드1", "키워드2", "키워드3"]}'
@@ -617,6 +623,7 @@ def label_cluster_with_llm(top_comments: list, fallback_texts: list = None) -> d
                         # <|think|> 토큰 없음 → thinking 비활성화, 빠른 응답
                         "content": (
                             "당신은 유튜브 댓글 여론 분석 전문가입니다. "
+                            "라벨에는 반드시 여론의 대상이 되는 주어를 포함하세요. "
                             "요청받은 JSON 형식으로만 답하세요. "
                             "설명이나 부연은 절대 하지 마세요."
                         ),
@@ -653,7 +660,7 @@ def label_cluster_with_llm(top_comments: list, fallback_texts: list = None) -> d
     try:
         prompt = (
             "당신은 유튜브 댓글 여론 분석 전문가입니다. "
-            "설명 없이 JSON만 답하세요.\n\n"
+            "라벨에는 반드시 여론의 대상이 되는 주어를 포함하고, 설명 없이 JSON만 답하세요.\n\n"
             f"{user_prompt}"
         )
         res = requests.post(
