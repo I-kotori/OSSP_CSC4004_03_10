@@ -1,14 +1,130 @@
-# app/routers/youtube.py 새로 생성
-
+import logging
 import os
+import re
 import requests
 from fastapi import APIRouter, HTTPException, Query
 from app.models import YouTubeSearchResponse, VideoResponse
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # .env 파일에 등록된 YOUTUBE_API_KEY를 가져옵니다.
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:e4b")
+
+GENERIC_QUERY_PHRASES = [
+    "기타 의견",
+    "기타의견",
+    "기타 댓글",
+    "기타댓글",
+    "기타",
+    "분류 안 됨",
+    "분류안됨",
+    "분류 불가",
+    "분류불가",
+    "others",
+    "noise",
+]
+
+QUERY_STOPWORDS = {
+    "그냥", "진짜", "정말", "너무", "계속", "이제", "이미", "아직",
+    "하는", "해서", "하면", "하고", "없는", "있는", "같은", "이런", "저런", "그런",
+    "입니다", "합니다", "하세요", "마세요", "됩니다", "때문", "댓글", "영상", "의견",
+    "절대", "그대로", "만드는", "둬라", "네버네버", "높아지겠지", "돈빼다가",
+    "넘길려고", "하지", "잘해라", "먹여", "살리기", "그놈의", "그만하자",
+}
+
+BROAD_SINGLE_TOKEN_QUERIES = {"공항", "정치", "정부", "뉴스", "댓글", "여론"}
+
+
+def _clean_search_query(q: str) -> str:
+    query = re.sub(r"\s+", " ", q or "").strip()
+    raw_has_generic = any(re.search(re.escape(phrase), query, flags=re.IGNORECASE) for phrase in GENERIC_QUERY_PHRASES)
+    for phrase in GENERIC_QUERY_PHRASES:
+        query = re.sub(re.escape(phrase), " ", query, flags=re.IGNORECASE)
+
+    query = re.sub(r"[^가-힣a-zA-Z0-9\s]", " ", query)
+    tokens = []
+    seen = set()
+    for token in re.split(r"\s+", query):
+        token = token.strip()
+        if token.lower() in QUERY_STOPWORDS:
+            continue
+        for ending in ("했습니다", "합니다", "됩니다", "하라고", "하자는", "하자", "했다", "한다", "하는", "하면", "해서", "하지"):
+            if token.endswith(ending) and len(token) > len(ending) + 1:
+                token = token[: -len(ending)]
+                break
+        for particle in ("으로", "이나"):
+            if token.endswith(particle) and len(token) > len(particle) + 1:
+                token = token[: -len(particle)]
+                break
+        if len(token) > 3 and token[-1] == "나":
+            token = token[:-1]
+        if len(token) > 2 and token[-1] in "은는이가을를에의도만":
+            token = token[:-1]
+        key = token.lower()
+        if len(token) < 2 or len(token) > 12:
+            continue
+        if key in QUERY_STOPWORDS:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        tokens.append(token)
+
+    if raw_has_generic and len(tokens) < 2:
+        return ""
+
+    return " ".join(tokens[:4]).strip()
+
+
+def _is_weak_search_query(q: str) -> bool:
+    compact = re.sub(r"\s+", "", q or "")
+    if len(compact) < 2:
+        return True
+    tokens = q.split()
+    if len(tokens) == 1 and tokens[0] in BROAD_SINGLE_TOKEN_QUERIES:
+        return True
+    return not re.search(r"[가-힣a-zA-Z0-9]", compact)
+
+
+def _refine_query_with_llm(q: str) -> str:
+    """
+    프론트는 q 하나만 넘기므로, 여기서는 검색어 문장만 짧게 다듬는다.
+    댓글 문맥 기반 보정은 pipeline.py에서 cluster label/tags 생성 시 수행한다.
+    """
+    try:
+        res = requests.post(
+            f"{OLLAMA_BASE_URL}/api/chat",
+            json={
+                "model": OLLAMA_MODEL,
+                "stream": False,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "당신은 유튜브 검색어를 다듬는 도우미입니다. 설명 없이 검색어만 답하세요.",
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "다음 검색어를 유튜브 검색에 적합하게 2~6개 핵심 단어로 다듬어주세요. "
+                            "기타, 분류 안 됨, 의견 같은 일반 단어는 제거하세요.\n"
+                            f"검색어: {q}"
+                        ),
+                    },
+                ],
+            },
+            timeout=20,
+        )
+        res.raise_for_status()
+        refined = res.json().get("message", {}).get("content", "").strip()
+        refined = re.sub(r"^[\"'`]+|[\"'`]+$", "", refined)
+        refined = re.sub(r"\s+", " ", refined).strip()
+        return refined[:80]
+    except Exception:
+        logger.exception("[YouTube] 검색어 LLM 보정 실패")
+        return q
 
 @router.get(
     "/search",
@@ -19,12 +135,27 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 def search_youtube_videos(q: str = Query(..., description="검색 쿼리 스트링")):
     if not YOUTUBE_API_KEY:
         raise HTTPException(status_code=500, detail="서버에 YOUTUBE_API_KEY가 설정되지 않았습니다.")
-        
+
+    raw_query = q
+    if re.search(r"분류\s*안\s*됨|noise", raw_query, flags=re.IGNORECASE):
+        logger.info("[YouTube] 분류 안 됨/noise 군집 추천 생략: raw_q=%s", raw_query)
+        return {"videos": []}
+
+    search_query = _clean_search_query(raw_query)
+    if _is_weak_search_query(search_query):
+        search_query = _clean_search_query(_refine_query_with_llm(raw_query))
+
+    if _is_weak_search_query(search_query):
+        logger.info("[YouTube] 검색어가 너무 일반적이라 추천 생략: raw_q=%s", raw_query)
+        return {"videos": []}
+
+    logger.info("[YouTube] 검색 요청: raw_q=%s, search_q=%s", raw_query, search_query)
+
     # 1. 1차 호출: 영상 검색 (search.list)
     search_url = "https://www.googleapis.com/youtube/v3/search"
     search_params = {
         "key": YOUTUBE_API_KEY,
-        "q": q,
+        "q": search_query,
         "part": "snippet",
         "type": "video",
         "maxResults": 5,          # 익스텐션 UI에 보여줄 추천 영상 수
@@ -66,11 +197,11 @@ def search_youtube_videos(q: str = Query(..., description="검색 쿼리 스트�
             # 조회수 가공 (ex. 125000 -> 12만회)
             raw_views = int(statistics.get("viewCount", 0))
             if raw_views >= 10000:
-                views_str = f"조회수 {raw_views // 10000}만회"
+                views_str = f"{raw_views // 10000}만회"
             elif raw_views >= 1000:
-                views_str = f"조회수 {raw_views // 1000}천회"
+                views_str = f"{raw_views // 1000}천회"
             else:
-                views_str = f"조회수 {raw_views}회"
+                views_str = f"{raw_views}회"
                 
             # 좋아요수 가공 (ex. 12500 -> 1.2만)
             raw_likes = int(statistics.get("likeCount", 0))

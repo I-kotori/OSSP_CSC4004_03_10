@@ -16,3 +16,7 @@ analyzer.db
 
 # 5. OS 생성 임시 파일 (맥북 환경 고려)
 .DS_Store
+
+# 6. Runtime logs and local benchmark outputs
+*.log
+benchmark_outputs/

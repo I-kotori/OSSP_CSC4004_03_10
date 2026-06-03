@@ -3,6 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv  # 추가
 
 load_dotenv()  # 추가
+import logging
+from app.logging_config import configure_app_logging
+
+LOG_PATH = configure_app_logging()
+logger = logging.getLogger(__name__)
+
 from app.routers import analyze, status, preload, youtube # 찬홍 수정
 from app.database import init_db
 from app.pipeline import start_worker
@@ -45,8 +51,10 @@ app.include_router(youtube.router, prefix="/youtube", tags=["유튜브 추천"])
 
 @app.on_event("startup")
 def on_startup():
+    logger.info("FastAPI startup 시작: log_path=%s", LOG_PATH)
     init_db()
     start_worker()
+    logger.info("FastAPI startup 완료")
 
 
 @app.get("/", tags=["헬스체크"])
