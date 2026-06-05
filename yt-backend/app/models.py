@@ -31,6 +31,8 @@ class AnalysisResult(BaseModel):
     timeline: List[TimelinePoint]
     analyzed_at: str
     cached: bool = Field(..., description="캐시에서 반환된 결과인지 여부")
+    pipeline_version: Optional[str] = Field(None, description="분석 파이프라인 버전")
+    performance: Optional[dict] = Field(None, description="단계별 타임스탬프와 소요 시간")
 
 
 class JobResponse(BaseModel):
