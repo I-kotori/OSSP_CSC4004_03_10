@@ -279,6 +279,88 @@
   gap: 28px;
 }
 
+/* 파이 + 사이드패널 가로 배치 */
+.cluster-main-row {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  width: 100%;
+  justify-content: center;
+}
+
+/* 편향 배지 사이드패널 */
+.cluster-side-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 220px;
+  max-width: 280px;
+}
+
+/* 편향 배지 공통 */
+.bias-badge {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 18px 20px;
+  border-radius: 14px;
+  border: 1px solid;
+  animation: fadeInBias 0.4s ease;
+}
+
+@keyframes fadeInBias {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 균형 상태 */
+.bias-badge.balanced {
+  background: rgba(74, 222, 128, 0.06);
+  border-color: rgba(74, 222, 128, 0.3);
+}
+
+/* 편향 상태 */
+.bias-badge.biased {
+  background: rgba(251, 191, 36, 0.07);
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+.bias-icon {
+  font-size: 24px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.bias-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bias-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #f1f1f1;
+}
+
+.bias-desc {
+  font-size: 13px;
+  color: #a8a8a8;
+  line-height: 1.55;
+}
+
+/* 반응형: 세로 배치로 변경 */
+@media (max-width: 640px) {
+  .cluster-main-row {
+    flex-direction: column;
+  }
+  .cluster-side-panel {
+    max-width: 100%;
+    width: 100%;
+  }
+}
+
 .cluster-pie-wrap {
   position: relative;
   display: inline-block;

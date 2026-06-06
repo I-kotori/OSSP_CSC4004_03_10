@@ -89,6 +89,7 @@ function polarToXY(cx, cy, r, deg) {
   };
 }
 
+//실제 분석 청
 async function fetchAnalysis(videoId) {
   try {
     analysisLoading = true;
@@ -228,6 +229,7 @@ function getTimelineData() {
   });
 }
 
+//상태 폴링(2초마다)
 async function pollJob(jobId) {
   console.log("폴링 시작:", jobId);
 
@@ -319,6 +321,7 @@ async function pollJob(jobId) {
   }, 2000);
 }
 
+//API 데이터를 그래프용 데이터로 환
 function slicePath(cx, cy, r, startDeg, endDeg) {
   const p1 = polarToXY(cx, cy, r, startDeg);
   const p2 = polarToXY(cx, cy, r, endDeg);
@@ -338,6 +341,69 @@ function renderTabContent(tab) {
   return renderers[tab]?.() || "";
 }
 
+// 편향 여부 감지 함수 (분류안됨 제외, 50% 이상이면 편향)
+function detectBias() {
+  if (!analysisData?.clusters) return null;
+
+  const BIAS_THRESHOLD = 50;
+
+  const all = analysisData.clusters;
+
+  if (!all.length) return null;
+
+  const total = all.reduce((sum, c) => sum + c.percent, 0);
+  if (total === 0) return null;
+
+  const withRelative = all.map((c) => ({
+    ...c,
+    relativePct: Math.round((c.percent / total) * 100),
+  }));
+
+  const dominant = withRelative.reduce((a, b) =>
+    a.relativePct > b.relativePct ? a : b
+  );
+
+  if (dominant.relativePct >= BIAS_THRESHOLD) {
+    return {
+      label: dominant.label,
+      relativePct: dominant.relativePct,
+      absolutePct: dominant.percent,
+    };
+  }
+
+  return null;
+}
+
+function renderBiasBadge() {
+  const bias = detectBias();
+
+  if (!bias) {
+    return `
+      <div class="bias-badge balanced">
+        <span class="bias-icon">✅</span>
+        <div class="bias-text">
+          <div class="bias-title">균형 잡힌 여론</div>
+          <div class="bias-desc">특정 군집이 두드러지지 않습니다</div>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="bias-badge biased">
+      <span class="bias-icon">⚠️</span>
+      <div class="bias-text">
+        <div class="bias-title">여론 편향 감지됨</div>
+        <div class="bias-desc">
+          <strong style="color:#fbbf24;">${bias.label}</strong> 군집이
+          분류된 댓글의 <strong style="color:#fbbf24;">${bias.relativePct}%</strong>를 차지합니다
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+//원형 차트 생성
 function renderClusterTab() {
   if (analysisLoading) {
     return `
@@ -369,39 +435,45 @@ function renderClusterTab() {
 
   return `
     <div class="cluster-tab-wrap">
-      <div class="cluster-pie-wrap">
-        <svg class="cluster-pie-svg" id="cluster-svg" viewBox="0 0 320 320" width="320" height="320">
-          <circle cx="${PIE.cx}" cy="${PIE.cy}" r="${PIE.r + 5}" fill="none" stroke="#2e2e2e" stroke-width="1"/>
+      <div class="cluster-main-row">
+        <div class="cluster-pie-wrap">
+          <svg class="cluster-pie-svg" id="cluster-svg" viewBox="0 0 320 320" width="320" height="320">
+            <circle cx="${PIE.cx}" cy="${PIE.cy}" r="${PIE.r + 5}" fill="none" stroke="#2e2e2e" stroke-width="1"/>
 
-          ${renderPieSlices(slices)}
+            ${renderPieSlices(slices)}
 
-          ${renderPieLabels(slices)}
+            ${renderPieLabels(slices)}
 
-          <circle cx="${PIE.cx}" cy="${PIE.cy}" r="54" fill="#1b1b1b"/>
+            <circle cx="${PIE.cx}" cy="${PIE.cy}" r="54" fill="#1b1b1b"/>
 
-          <text
-            x="${PIE.cx}"
-            y="${PIE.cy - 9}"
-            text-anchor="middle"
-            fill="#f1f1f1"
-            font-size="20"
-            font-weight="900"
-          >
-            ${analysisData.total_comments.toLocaleString()}
-          </text>
+            <text
+              x="${PIE.cx}"
+              y="${PIE.cy - 9}"
+              text-anchor="middle"
+              fill="#f1f1f1"
+              font-size="20"
+              font-weight="900"
+            >
+              ${analysisData.total_comments.toLocaleString()}
+            </text>
 
-          <text
-            x="${PIE.cx}"
-            y="${PIE.cy + 13}"
-            text-anchor="middle"
-            fill="#9aa3b5"
-            font-size="11"
-          >
-            총 댓글
-          </text>
-        </svg>
+            <text
+              x="${PIE.cx}"
+              y="${PIE.cy + 13}"
+              text-anchor="middle"
+              fill="#9aa3b5"
+              font-size="11"
+            >
+              총 댓글
+            </text>
+          </svg>
 
-        ${renderClusterTooltips(slices)}
+          ${renderClusterTooltips(slices)}
+        </div>
+
+        <div class="cluster-side-panel">
+          ${renderBiasBadge()}
+        </div>
       </div>
 
       <div class="cluster-legend">
@@ -728,6 +800,7 @@ function renderCommentGroup(title, comments, color, colorClass) {
   `;
 }
 
+//군집별 유튜브 검색
 async function fetchClusterVideos(cluster) {
 
   try {
