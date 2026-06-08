@@ -202,23 +202,6 @@ git commit -m "fix: 네이버페이 결제수단 오류 수정"
 git commit -m "style: 식당리스트 카드디자인 수정"
 ```
 
-## 📁 폴더 구조
-
-```txt
-src/
-  api/          # axios 인스턴스/요청 함수
-  components/   # UI 컴포넌트 (도메인별 폴더 포함)
-  hooks/        # 커스텀 훅
-  layouts/      # 레이아웃
-  lib/          # 공용 유틸 (cn 등)
-  pages/        # 라우트 단위 페이지
-  query/        # TanStack Query 설정
-  stores/       # 전역 상태관리
-  styles/       # 전역 스타일
-  types/        # 전역 타입 (UI 모델)
-  utils/        # 공용 유틸 함수
-```
-
 ## 🌿 Branch
 
 - main : 배포/최종 안정 브랜치 **(직접 push 금지)**
@@ -293,13 +276,26 @@ Closes #이슈번호
 
 ```bash
 git clone https://github.com/OSSP-CSC4004-03-10/OSSP_CSC4004_03_10.git
-cd OSSP_10
-pnpm i
+cd OSSP_CSC4004_03_10
+```
+
+Frontend:
+
+Chrome에서 `chrome://extensions`로 이동한 뒤 개발자 모드를 켜고 `youtube-comment-analyzer` 폴더를 압축해제된 확장 프로그램으로 불러옵니다.
+
+Backend:
+
+```bash
+cd yt-backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
 ```
 
 ### 2. Environment Values
 
-.env는 커밋하지 않습니다. .env.example을 복사해서 사용합니다.
+`.env`는 커밋하지 않습니다. 필요한 환경변수는 각 서비스의 `.env.example`을 복사해서 사용합니다.
 
 ```bash
 # macOS/Linux
@@ -311,15 +307,19 @@ cp .env.example .env
 copy .env.example .env
 ```
 
-### 3. Run
+Backend 주요 환경변수:
 
-```bash
-pnpm dev
+```env
+YOUTUBE_API_KEY=your_youtube_data_api_key
+DB_PATH=analyzer.db
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=gemma4:e4b
+EMBEDDING_MODEL_NAME=jhgan/ko-sroberta-multitask
+EMBEDDING_CACHE_ENABLED=1
+APP_LOG_PATH=server.log
+APP_LOG_LEVEL=INFO
 ```
 
-### 4. Build/Preview
+### 3. Frontend Reload
 
-```bash
-pnpm build
-pnpm preview
-```
+프론트엔드는 별도 빌드 과정이 없습니다. `content.js`, `style.css`, `manifest.json` 수정 후 Chrome Extension 관리 화면에서 새로고침하면 반영됩니다.
