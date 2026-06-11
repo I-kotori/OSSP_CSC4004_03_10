@@ -11,6 +11,7 @@ def preload_videos(request: PreloadRequest, background_tasks: BackgroundTasks):
     logger.info("[Preload] 사전 분석 요청 수신: count=%s", len(request.video_ids))
     results = []
     for video_id in request.video_ids:
+        video_id = video_id.strip()
         cached = get_cached_result(video_id)
         if cached:
             logger.info("[Preload] 캐시로 skip: video_id=%s", video_id)
