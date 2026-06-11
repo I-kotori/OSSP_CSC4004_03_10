@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
     response_model=JobResponse,
 )
 def request_analysis(video_id: str, background_tasks: BackgroundTasks):
+    video_id = video_id.strip()
     logger.info("[Analyze] 분석 요청 수신: video_id=%s", video_id)
     cached = get_cached_result(video_id)
     if cached:

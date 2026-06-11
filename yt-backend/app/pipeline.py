@@ -1408,7 +1408,7 @@ def _run_analysis_internal(job_id: str, video_id: str):
 
     except Exception as e:
         log_step(f"오류 발생: {str(e)}")
-        update_job(job_id, "failed", 0, f"오류 발생: {str(e)}")
+        update_job(job_id, "failed", 0, "분석 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
         raise
 
 
